@@ -18,10 +18,19 @@
 #include <signal.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
+#include <string.h>
+#include <stddef.h>
 
-void SIGINT_handler(int signo); // Handles SIGINT signal.
+// Handles SIGINT signal.
+void SIGINT_handler(int signo);
+// Splits input line.
+char* split_input(char* input_line);
+// String search and replace.
+char* str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word); 
+
 
 int main() {
   struct sigaction SIGINT_action = {0}, ignore_action = {0};
@@ -53,6 +62,23 @@ int main() {
       // Read was successful.
       printf("Read was successful\n");
       printf("Here is what was read: %s\n", input_line);
+      //printf("After splitting:\n");     
+      //char* token = split_input(input_line);
+      //split_input(input_line);
+      
+
+      printf("After replaceing $$ with !!\n");
+      char *result = str_gsub(&input_line, "$$", "!!");
+      if (!result) {
+        exit(1);
+      }
+      input_line = result;
+      printf("%s", input_line);
+      free(input_line);
+      return 0;
+
+
+
     } else {
       // Read was successful.
       fprintf(stderr, "Read was unsuccessful. getline() returned %li and errno is %s\n", line_length, strerror(errno));
@@ -60,10 +86,54 @@ int main() {
   }
 }
 
-void SIGINT_handler(int signo){
+
+void SIGINT_handler(int signo) {
   char* message = "\nCaught SIGINT\n";
   write(STDOUT_FILENO, message, 16);
   raise(SIGUSR2);
+}
+
+
+char* split_input(char* input_line) {
+  char* tokens = strtok(input_line, " \t\n");
+  while (tokens != NULL) {
+    printf("%s\n", tokens);
+    tokens = strtok(NULL, " \t\n");
+  }
+  return tokens;
+}
+
+
+char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word) {
+  char *str = *input_line;
+  size_t input_line_len = strlen(str);
+  size_t const old_word_len = strlen(old_word), new_word_len = strlen(new_word);
+
+  for (; (str = strstr(str, old_word)); ) {
+    ptrdiff_t off = str - *input_line;
+    if (new_word_len > old_word_len) {
+      str = realloc(*input_line, sizeof **input_line * (input_line_len + new_word_len - old_word_len + 1));
+      if (!str) {
+        return str;
+      }
+      *input_line = str;
+      str = *input_line + off;
+    }
+    memmove(str + new_word_len , str + old_word_len, input_line_len + 1 - off - old_word_len);
+    memcpy(str, new_word, new_word_len);
+    input_line_len = input_line_len + new_word_len - old_word_len;
+    str += new_word_len;
+  }
+  str = *input_line;
+  if(new_word_len < old_word_len) {
+    str = realloc(*input_line, sizeof **input_line * (input_line_len + 1));
+    if (!str) {
+      return str;
+    }
+    *input_line = str;
+  }
+
+  return str;
 }
 
 /* INPUT
