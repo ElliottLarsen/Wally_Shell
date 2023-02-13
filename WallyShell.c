@@ -55,7 +55,8 @@ int main() {
   size_t n = 0;
   for (;;) {
     // Printing a input prompt.
-    fprintf(stderr, "%s", getenv("PS1"));
+    fprintf(stderr, "%s ", getenv("PS1"));
+    fflush(stderr);
     // Grab user input.
     ssize_t line_length = getline(&input_line, &n, stdin);
     if (line_length != -1) {
@@ -66,7 +67,29 @@ int main() {
       //char* token = split_input(input_line);
       //split_input(input_line);
       
+      // Any occurrence of ~/ at the beginning of a word is replaced with the value of the HOME environment variable.
+      if (input_line[0] == '~' && input_line[1] == '/') {
+        char *result = str_gsub(&input_line, "~", getenv("HOME"));
+        if (!result) {
+          exit(1);
+        }
 
+        input_line = result;
+        //printf("%s", input_line);
+        //free(input_line);
+        //return 0;
+      } 
+      // Any occurrence of "$$" within a word is replaced with the process ID of the shell.
+      char mypid[1024];
+      sprintf(mypid, "%d", getpid());
+      printf("Here is pid: %d\n", getpid());
+      char *result = str_gsub(&input_line, "$$", mypid);
+      input_line = result;
+      printf("%s", input_line);
+      free(input_line);
+
+ 
+      /*
       printf("After replaceing $$ with !!\n");
       char *result = str_gsub(&input_line, "$$", "!!");
       if (!result) {
@@ -76,8 +99,7 @@ int main() {
       printf("%s", input_line);
       free(input_line);
       return 0;
-
-
+      */
 
     } else {
       // Read was successful.
@@ -108,6 +130,7 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
   char *str = *input_line;
   size_t input_line_len = strlen(str);
   size_t const old_word_len = strlen(old_word), new_word_len = strlen(new_word);
+  char* home_flag = "~";
 
   for (; (str = strstr(str, old_word)); ) {
     ptrdiff_t off = str - *input_line;
@@ -123,6 +146,10 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
     memcpy(str, new_word, new_word_len);
     input_line_len = input_line_len + new_word_len - old_word_len;
     str += new_word_len;
+
+    if (strcmp(old_word, home_flag) == 0){
+      break;
+    }
   }
   str = *input_line;
   if(new_word_len < old_word_len) {
