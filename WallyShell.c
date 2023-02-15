@@ -38,6 +38,7 @@ int main() {
   size_t n = 0;
   char* prompt = getenv("PS1");
   char mypid[1024];
+  sprintf(mypid, "%d", getpid());
   char input_file[1024 + 1];
   char ouput_file[1024 + 1];
   //char* args[1024 + 1] = {NULL};
@@ -76,32 +77,44 @@ int main() {
     ssize_t line_length = getline(&input_line, &n, stdin);
     if (line_length != -1) {
       // Read was successful.
-      printf("Read was successful\n");
       printf("Here is what was read: %s\n", input_line);
-      // Tokenize input_line.
+      // Treating input line before tokenizing it.
+      input_line[strlen(input_line) - 1] = '\0';
+
+      if (input_line[0] == '~' && input_line[1] == '/') {
+        char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
+        if (!home_expansion_result) {
+          exit(1);
+        }
+        input_line = home_expansion_result;
+      }
+
+      char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
+      input_line = pid_expansion_result;
       split_input(input_line, args, &args_num);
+      printf("My pid: %d\n", getpid());
       printf("Number of command arguments: %d\n", args_num);
       // Any occurrence of ~/ at the beginning of a word is replaced with the value of the HOME environment variable.
       // This needs to be done with args.  Probably first two characters of args[1].
-      if (input_line[0] == '~' && input_line[1] == '/') {
-        char *result = str_gsub(&input_line, "~", getenv("HOME"));
-        if (!result) {
-          exit(1);
-        }
+      //if (input_line[0] == '~' && input_line[1] == '/') {
+      //  char *result = str_gsub(&input_line, "~", getenv("HOME"));
+      //  if (!result) {
+      //    exit(1);
+      //  }
 
-        input_line = result;
+        //input_line = result;
         //printf("%s", input_line);
         //FREE INPUT_LINE
         //free(input_line);
         //return 0;
         //free(input_line);
-      } 
+      //} 
       // Any occurrence of "$$" within a word is replaced with the process ID of the shell.
-      sprintf(mypid, "%d", getpid());
-      printf("Here is pid: %d\n", getpid());
-      char *result = str_gsub(&input_line, "$$", mypid);
-      input_line = result;
-      printf("%s\n", input_line);
+      //sprintf(mypid, "%d", getpid());
+      //printf("Here is pid: %d\n", getpid());
+      //char *result = str_gsub(&input_line, "$$", mypid);
+      //input_line = result;
+      //printf("%s\n", input_line);
       //free(input_line);
 
  
