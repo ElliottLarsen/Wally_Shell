@@ -31,7 +31,9 @@ char *split_input(char* input_line, char* args[1025], int* args_num);
 // String search and replace.
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word); 
 // Input line expansion.
-char *input_expansion(char *input_line, char mypid[1024]);
+char *input_expansion(char *input_line, char mypid[1024], int *home_expanded);
+// Execute the command.
+int execute_command(char *args[1025], int *args_num);
 
 int main() {
 
@@ -68,6 +70,7 @@ int main() {
   for (;;) {
     char* args[1024 + 1] = {NULL};
     args_num = 0;
+    int home_expanded = 0;
     // Printing a input prompt.
     if (prompt != NULL) {
       //fflush(stderr);
@@ -77,61 +80,12 @@ int main() {
     // Grab user input.
     ssize_t line_length = getline(&input_line, &n, stdin);
     if (line_length != -1) {
-      // Read was successful.
-      //printf("Here is what was read: %s\n", input_line);
-      // Treating input line before tokenizing it.
-      //input_line[strlen(input_line) - 1] = '\0';
-
-      //if (input_line[0] == '~' && input_line[1] == '/') {
-      //  char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
-      //  if (!home_expansion_result) {
-      //    exit(1);
-      //  }
-      //  input_line = home_expansion_result;
-      //}
-
-      //char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
-      //input_line = pid_expansion_result;
-      printf("MYPID before expansion: %d\n", getpid());
-      input_line = input_expansion(input_line, mypid);
+      // If grabbing user input was successful, expand the input.
+      input_line = input_expansion(input_line, mypid, &home_expanded);
+      // Split the input and copy each argument to args.
       split_input(input_line, args, &args_num);
-      printf("My pid: %d\n", getpid());
-      printf("Number of command arguments: %d\n", args_num);
-      // Any occurrence of ~/ at the beginning of a word is replaced with the value of the HOME environment variable.
-      // This needs to be done with args.  Probably first two characters of args[1].
-      //if (input_line[0] == '~' && input_line[1] == '/') {
-      //  char *result = str_gsub(&input_line, "~", getenv("HOME"));
-      //  if (!result) {
-      //    exit(1);
-      //  }
-
-        //input_line = result;
-        //printf("%s", input_line);
-        //FREE INPUT_LINE
-        //free(input_line);
-        //return 0;
-        //free(input_line);
-      //} 
-      // Any occurrence of "$$" within a word is replaced with the process ID of the shell.
-      //sprintf(mypid, "%d", getpid());
-      //printf("Here is pid: %d\n", getpid());
-      //char *result = str_gsub(&input_line, "$$", mypid);
-      //input_line = result;
-      //printf("%s\n", input_line);
-      //free(input_line);
-
- 
-      /*
-      printf("After replaceing $$ with !!\n");
-      char *result = str_gsub(&input_line, "$$", "!!");
-      if (!result) {
-        exit(1);
-      }
-      input_line = result;
-      printf("%s", input_line);
-      free(input_line);
-      return 0;
-      */
+      // Execute commands.
+      int execute_result = execute_command(args, &args_num);
 
     } else {
       // Read was successful.
@@ -158,8 +112,8 @@ char* split_input(char* input_line, char* args[1025], int* args_num) {
   }
   char *tokens = strtok(input_line, IFS);
   while (tokens != NULL) {
-    printf("%s\n", tokens);
-    printf("%p\n", &tokens);
+    //printf("%s\n", tokens);
+    //printf("%p\n", &tokens);
 
     if (strdup(tokens) != NULL) {
       args[*args_num] = strdup(tokens);
@@ -212,11 +166,12 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
   return str;
 }
 
-char *input_expansion(char *input_line, char mypid[1024]) {
-  printf("Here is what was read: %s\n", input_line);
+char *input_expansion(char *input_line, char mypid[1024], int *home_expanded) {
+  //printf("Here is what was read: %s\n", input_line);
   input_line[strlen(input_line) - 1] = '\0';
-  if (input_line[0] == '~' && input_line[1] == '/') {
+  if (!*home_expanded) {
     char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
+    *home_expanded = 1;
     if (!home_expansion_result) {
       exit(1);
     }
@@ -225,9 +180,50 @@ char *input_expansion(char *input_line, char mypid[1024]) {
   char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
   input_line = pid_expansion_result;
 
-  printf("Input_line after input_expansion: %s\n", input_line);
+  //printf("Input_line after input_expansion: %s\n", input_line);
 
   return input_line;
+}
+
+int execute_command(char *args[1025], int *args_num) {
+
+  // CD commandi.
+  if (strcmp(args[0], "cd") == 0) {
+    if (*args_num > 2) {
+      return 1;
+    } 
+
+    if (*args_num == 2) {
+      chdir(args[1]);
+      
+      char cwd[1024];
+      if (getcwd(cwd, sizeof(cwd)) != NULL) {
+        printf("Path: %s\n", cwd);
+      } else {
+        printf("CWD Error");
+      }
+      return 0;
+    } else {
+      char *home_dir;
+      home_dir = getenv("HOME");
+      if (home_dir) {
+        chdir(home_dir);
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+          printf("PWD: %s\n", cwd);
+        } else {
+          printf("CWDError");
+        }
+        
+        return 0;
+      } else {
+        return 1;
+      }
+    }
+  }
+
+return 0;
+
 }
 
 /* INPUT
