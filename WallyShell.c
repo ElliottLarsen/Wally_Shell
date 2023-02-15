@@ -27,12 +27,23 @@
 // Handles SIGINT signal.
 void SIGINT_handler(int signo);
 // Splits input line.
-char* split_input(char* input_line);
+char* split_input(char* input_line, char* args[1025]);
 // String search and replace.
 char* str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word); 
 
 
 int main() {
+
+  char* input_line = NULL;
+  size_t n = 0;
+  char* prompt = getenv("PS1");
+  char mypid[1024];
+  char input_file[1024 + 1];
+  char ouput_file[1024 + 1];
+  char* args[1024 + 1] = {NULL};
+
+
+
   struct sigaction SIGINT_action = {0}, ignore_action = {0};
   // Fill out the SIGINT_action struct.
   SIGINT_action.sa_handler = SIGINT_handler;
@@ -51,23 +62,24 @@ int main() {
   sigaction(SIGTSTP, &ignore_action, NULL);
   */
 
-  char* input_line = NULL;
-  size_t n = 0;
   for (;;) {
     // Printing a input prompt.
-    fprintf(stderr, "%s ", getenv("PS1"));
-    fflush(stderr);
+    if (prompt != NULL) {
+      //fflush(stderr);
+      fprintf(stderr, "%s", prompt);
+      fflush(stderr);
+    }
     // Grab user input.
     ssize_t line_length = getline(&input_line, &n, stdin);
     if (line_length != -1) {
       // Read was successful.
       printf("Read was successful\n");
       printf("Here is what was read: %s\n", input_line);
-      //printf("After splitting:\n");     
-      //char* token = split_input(input_line);
-      //split_input(input_line);
+      // Tokenize input_line.
+      split_input(input_line, args);
       
       // Any occurrence of ~/ at the beginning of a word is replaced with the value of the HOME environment variable.
+      // This needs to be done with args.  Probably first two characters of args[1].
       if (input_line[0] == '~' && input_line[1] == '/') {
         char *result = str_gsub(&input_line, "~", getenv("HOME"));
         if (!result) {
@@ -76,11 +88,11 @@ int main() {
 
         input_line = result;
         //printf("%s", input_line);
+        //FREE INPUT_LINE
         //free(input_line);
         //return 0;
       } 
       // Any occurrence of "$$" within a word is replaced with the process ID of the shell.
-      char mypid[1024];
       sprintf(mypid, "%d", getpid());
       printf("Here is pid: %d\n", getpid());
       char *result = str_gsub(&input_line, "$$", mypid);
@@ -106,6 +118,7 @@ int main() {
       fprintf(stderr, "Read was unsuccessful. getline() returned %li and errno is %s\n", line_length, strerror(errno));
     }
   }
+  // FREE ARGS.
 }
 
 
@@ -116,11 +129,27 @@ void SIGINT_handler(int signo) {
 }
 
 
-char* split_input(char* input_line) {
-  char* tokens = strtok(input_line, " \t\n");
+char* split_input(char* input_line, char* args[1025]) {
+  if (!(getenv("IFS"))) {
+    setenv("IFS", " \t\n", 1);
+  }
+
+  char *IFS = getenv("IFS");
+  char *tokens = strtok(input_line, IFS);
+  int i = 0;
   while (tokens != NULL) {
     printf("%s\n", tokens);
-    tokens = strtok(NULL, " \t\n");
+    printf("%p\n", &tokens);
+
+    if (strdup(tokens) != NULL) {
+      args[i] = strdup(tokens);
+      i++;
+    } else {
+      free(args);
+      exit(1);
+    }
+
+    tokens = strtok(NULL, IFS);
   }
   return tokens;
 }
