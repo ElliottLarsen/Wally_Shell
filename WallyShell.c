@@ -27,16 +27,17 @@
 // Handles SIGINT signal.
 void SIGINT_handler(int signo);
 // Splits input line.
-char* split_input(char* input_line, char* args[1025], int* args_num);
+char *split_input(char* input_line, char* args[1025], int* args_num);
 // String search and replace.
-char* str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word); 
-
+char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word); 
+// Input line expansion.
+char *input_expansion(char *input_line, char mypid[1024]);
 
 int main() {
 
-  char* input_line = NULL;
+  char *input_line = NULL;
   size_t n = 0;
-  char* prompt = getenv("PS1");
+  char *prompt = getenv("PS1");
   char mypid[1024];
   sprintf(mypid, "%d", getpid());
   char input_file[1024 + 1];
@@ -77,20 +78,22 @@ int main() {
     ssize_t line_length = getline(&input_line, &n, stdin);
     if (line_length != -1) {
       // Read was successful.
-      printf("Here is what was read: %s\n", input_line);
+      //printf("Here is what was read: %s\n", input_line);
       // Treating input line before tokenizing it.
-      input_line[strlen(input_line) - 1] = '\0';
+      //input_line[strlen(input_line) - 1] = '\0';
 
-      if (input_line[0] == '~' && input_line[1] == '/') {
-        char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
-        if (!home_expansion_result) {
-          exit(1);
-        }
-        input_line = home_expansion_result;
-      }
+      //if (input_line[0] == '~' && input_line[1] == '/') {
+      //  char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
+      //  if (!home_expansion_result) {
+      //    exit(1);
+      //  }
+      //  input_line = home_expansion_result;
+      //}
 
-      char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
-      input_line = pid_expansion_result;
+      //char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
+      //input_line = pid_expansion_result;
+      printf("MYPID before expansion: %d\n", getpid());
+      input_line = input_expansion(input_line, mypid);
       split_input(input_line, args, &args_num);
       printf("My pid: %d\n", getpid());
       printf("Number of command arguments: %d\n", args_num);
@@ -147,10 +150,12 @@ void SIGINT_handler(int signo) {
 
 
 char* split_input(char* input_line, char* args[1025], int* args_num) {
+  char *IFS;
   if (!(getenv("IFS"))) {
-    setenv("IFS", " \t\n", 1);
+    IFS = " \t\n";
+  } else {
+    IFS = getenv("IFS");
   }
-  char *IFS = getenv("IFS");
   char *tokens = strtok(input_line, IFS);
   while (tokens != NULL) {
     printf("%s\n", tokens);
@@ -205,6 +210,24 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
   }
 
   return str;
+}
+
+char *input_expansion(char *input_line, char mypid[1024]) {
+  printf("Here is what was read: %s\n", input_line);
+  input_line[strlen(input_line) - 1] = '\0';
+  if (input_line[0] == '~' && input_line[1] == '/') {
+    char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
+    if (!home_expansion_result) {
+      exit(1);
+    }
+    input_line = home_expansion_result;
+  }
+  char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
+  input_line = pid_expansion_result;
+
+  printf("Input_line after input_expansion: %s\n", input_line);
+
+  return input_line;
 }
 
 /* INPUT
