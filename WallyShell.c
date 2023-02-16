@@ -170,8 +170,14 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
 char *input_expansion(char *input_line, char mypid[1024], int *home_expanded) {
   //printf("Here is what was read: %s\n", input_line);
   input_line[strlen(input_line) - 1] = '\0';
+  char *home_expansion_result;
   if (!*home_expanded) {
-    char *home_expansion_result = str_gsub(&input_line, "~", getenv("HOME"));
+    char *home_dir = getenv("HOME");
+    if (home_dir) {
+      home_expansion_result = str_gsub(&input_line, "~", home_dir);
+    } else {
+      exit(1);
+    }
     *home_expanded = 1;
     if (!home_expansion_result) {
       exit(1);
