@@ -91,6 +91,7 @@ int main() {
       // Read was successful.
       fprintf(stderr, "Read was unsuccessful. getline() returned %li and errno is %s\n", line_length, strerror(errno));
     }
+    free(*args);
   }
   // FREE ARGS.
 }
