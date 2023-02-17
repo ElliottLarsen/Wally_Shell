@@ -1,14 +1,6 @@
 // Author: Elliott Larsen
-// Date: 
-// Description:
-
-/* This shell will:
- * Print an interactive inpput prompt.
- * Parse command line input into semantic tokens.
- * Implement parameter expansion ($$, $?, $!, and ~).
- * Implement two shell built-in commands (exit and cd).
- * Execute non-built-in commands using the appropriate exec() function (<, >, &, etc.)
- * Implement custom behavior for SIGINT and SIGTSTP signals */
+// Date:
+// Description: Second pass with no modular approach.
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -24,125 +16,16 @@
 #include <string.h>
 #include <stddef.h>
 
-// Handles SIGINT signal.
-void SIGINT_handler(int signo);
-// Splits input line.
-char *split_input(char* input_line, char* args[1025], int* args_num);
-// String search and replace.
-char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word); 
-// Input line expansion.
-char *input_expansion(char *input_line, char mypid[1024], int *home_expanded);
-// Execute the command.
-int execute_command(char *args[1025], int *args_num);
-
-int main() {
-
-  char *input_line = NULL;
-  size_t n = 0;
-  char *prompt = getenv("PS1");
-  char mypid[1024];
-  sprintf(mypid, "%d", getpid());
-  char input_file[1024 + 1];
-  char ouput_file[1024 + 1];
-  //char* args[1024 + 1] = {NULL};
-  int args_num = 0;
-
-
-
-  struct sigaction SIGINT_action = {0}, ignore_action = {0};
-  // Fill out the SIGINT_action struct.
-  SIGINT_action.sa_handler = SIGINT_handler;
-  // Check the following two lines.
-  // Block all catchable signals while SIGINT_handler is running.
-  sigfillset(&SIGINT_action.sa_mask);
-  // No flags set.
-  SIGINT_action.sa_flags = 0;
-  sigaction(SIGINT, &SIGINT_action, NULL);
-  // SIGTSTP normally casuses a process to halt, which is undesirable.
-  // This shell does not respond to this signal and it sets its disposition to SIG_IGN.
-  signal(SIGTSTP, SIG_IGN);
-  /*
-  // Fill out the ignore_action struct, which will ignore SIGTSTP. 
-  ignore_action.sa_handler = SIG_IGN;
-  sigaction(SIGTSTP, &ignore_action, NULL);
-  */
-
-  for (;;) {
-    char* args[1024 + 1] = {NULL};
-    args_num = 0;
-    int home_expanded = 0;
-    // Printing a input prompt.
-    if (prompt != NULL) {
-      //fflush(stderr);
-      fprintf(stderr, "%s", prompt);
-      fflush(stderr);
-    }
-    // Grab user input.
-    ssize_t line_length = getline(&input_line, &n, stdin);
-    if (line_length != -1) {
-      // If grabbing user input was successful, expand the input.
-      input_line = input_expansion(input_line, mypid, &home_expanded);
-      // Split the input and copy each argument to args.
-      split_input(input_line, args, &args_num);
-      // Execute commands.
-      int execute_result = execute_command(args, &args_num);
-
-    } else {
-      // Read was successful.
-      fprintf(stderr, "Read was unsuccessful. getline() returned %li and errno is %s\n", line_length, strerror(errno));
-    }
-    free(*args);
-  }
-  // FREE ARGS.
-}
-
-
-void SIGINT_handler(int signo) {
-  char* message = "\nCaught SIGINT\n";
-  write(STDOUT_FILENO, message, 16);
-  raise(SIGUSR2);
-}
-
-
-char* split_input(char* input_line, char* args[1025], int* args_num) {
-  char *IFS;
-  if (!(getenv("IFS"))) {
-    IFS = " \t\n";
-  } else {
-    IFS = getenv("IFS");
-  }
-  char *tokens = strtok(input_line, IFS);
-  while (tokens != NULL) {
-    //printf("%s\n", tokens);
-    //printf("%p\n", &tokens);
-
-    if (strdup(tokens) != NULL) {
-      args[*args_num] = strdup(tokens);
-      *args_num += 1;
-    } else {
-      free(args);
-      exit(1);
-    }
-
-    tokens = strtok(NULL, IFS);
-  }
-  return tokens;
-}
-
-
-char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word) {
+char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded) {
   char *str = *input_line;
   size_t input_line_len = strlen(str);
   size_t const old_word_len = strlen(old_word), new_word_len = strlen(new_word);
-  char* home_flag = "~";
 
   for (; (str = strstr(str, old_word)); ) {
     ptrdiff_t off = str - *input_line;
     if (new_word_len > old_word_len) {
       str = realloc(*input_line, sizeof **input_line * (input_line_len + new_word_len - old_word_len + 1));
-      if (!str) {
-        return str;
-      }
+      if (!str) goto exit;
       *input_line = str;
       str = *input_line + off;
     }
@@ -151,200 +34,327 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
     input_line_len = input_line_len + new_word_len - old_word_len;
     str += new_word_len;
 
-    if (strcmp(old_word, home_flag) == 0){
-      break;
-    }
+    if (is_home_dir_expanded) goto exit;
   }
+
   str = *input_line;
   if(new_word_len < old_word_len) {
     str = realloc(*input_line, sizeof **input_line * (input_line_len + 1));
-    if (!str) {
-      return str;
-    }
+    if (!str) goto exit;
     *input_line = str;
   }
-
-  return str;
+  
+  exit:
+    return str;
 }
 
-char *input_expansion(char *input_line, char mypid[1024], int *home_expanded) {
-  //printf("Here is what was read: %s\n", input_line);
-  input_line[strlen(input_line) - 1] = '\0';
-  char *home_expansion_result;
-  if (!*home_expanded) {
-    char *home_dir = getenv("HOME");
-    if (home_dir) {
-      home_expansion_result = str_gsub(&input_line, "~", home_dir);
-    } else {
-      exit(1);
+int main(void) {
+  char *user_input = NULL;
+  int args_num = 0;
+  size_t n = 0;
+  char *IFS;
+  char *home_dir;
+  char pid[1024];
+  sprintf(pid, "%d", getpid());
+  
+
+  char *out_file_name = NULL;
+  char *in_file_name = NULL;
+  char *args[1024 + 5] = {NULL};
+  char *tokens = NULL;
+
+  int is_home_dir_expanded = 0;
+  int should_run_in_bg = 0;
+
+  for (;;) {
+    // Reset variables.
+    tokens = NULL;
+    args_num = 0;
+
+    should_run_in_bg = 0;
+
+    // Managing Background Processes
+    
+    
+    // Prompt
+    char *prompt;
+    if (!(prompt = getenv("PS1"))) {
+      prompt = "\0";
     }
-    *home_expanded = 1;
-    if (!home_expansion_result) {
-      exit(1);
+    fprintf(stderr, "%s", prompt);
+    fflush(stderr);
+
+    ssize_t line_length = getline(&user_input, &n, stdin);
+
+    // Error from reading an input.
+    if (line_length == -1) {
+      clearerr(stderr);
+      clearerr(stdin);
+      errno = 0;
+      continue;
     }
-    input_line = home_expansion_result;
-  }
-  char *pid_expansion_result = str_gsub(&input_line, "$$", mypid);
-  input_line = pid_expansion_result;
 
-  //printf("Input_line after input_expansion: %s\n", input_line);
+    // Word Splitting.
+    IFS = getenv("IFS");
+    if (IFS == NULL) {
+      IFS = " \t\n";
+    }
 
-  return input_line;
-}
-
-int execute_command(char *args[1025], int *args_num) {
-
-  // CD commandi.
-  if (strcmp(args[0], "cd") == 0) {
-    if (*args_num > 2) {
-      return 1;
-    } 
-
-    if (*args_num == 2) {
-      chdir(args[1]);
-      
-      char cwd[1024];
-      if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        printf("Path: %s\n", cwd);
+    tokens = strtok(user_input, IFS);
+    while (tokens != NULL) {
+      if (strdup(tokens) != NULL) {
+        args[args_num] = strdup(tokens);
+        args_num += 1;
       } else {
-        printf("CWD Error");
+        // free args?
+        printf("\nString split error\n");
+        exit(1);
       }
-      return 0;
-    } else {
-      char *home_dir;
-      home_dir = getenv("HOME");
-      if (home_dir) {
-        chdir(home_dir);
-        char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd)) != NULL) {
-          printf("PWD: %s\n", cwd);
+      tokens = strtok(NULL, IFS);
+    }
+
+
+    // If no input is given.
+    if (args_num == 0) {
+      continue;
+    }
+
+
+
+    // Expansion
+    // If args[0] is not a command or a comment? Should I worry about it in the Execusion stage?
+
+    int i = 0;
+    while (i < args_num && args[i] != NULL) {
+      // "~/" expansion with the HOME environment variable.
+      is_home_dir_expanded = 0;
+      if (strncmp(args[i], "~/", 2) == 0) {
+        home_dir = getenv("HOME");
+        if (home_dir) {
+          is_home_dir_expanded = 1;
+          str_gsub(&args[i], "~", home_dir, &is_home_dir_expanded);
         } else {
-          printf("CWDError");
+          // What to do if there is no getenv("HOME")?
         }
-        
-        return 0;
-      } else {
-        return 1;
+        // "$$" expansion with the shell's PID.
+        str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
+        // "$?" expansion.
+        // "$!" expansion.
+      }
+      i++;
+    }
+
+
+
+    // Parsing
+    i = 0;
+    // Find the index number to either # or end of the input.
+    while (i < args_num) {
+      if ((strcmp(args[i], "#") == 0) || i == args_num -1) {
+        break;
+      }
+      i++;
+    }
+
+    // cat myfile > output.txt & #
+    if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0 && strcmp(args[i - 1], "&") == 0) {
+      args[i] = NULL;
+      should_run_in_bg = 1;
+      if(strcmp(args[i - 3], ">") == 0) {
+        out_file_name = args[i - 2];
+        args[i - 3] = NULL;
+      } else if (strcmp(args[i - 3], "<") == 0) {
+        in_file_name = args[i - 2];
+        args[i - 3] = NULL;
       }
     }
+    // cat myfile > output.txt #
+    else if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0) {
+      args[i] = NULL;
+      if(strcmp(args[i - 2], ">") == 0) {
+        out_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      } else if (strcmp(args[i - 2], "<") == 0) {
+        in_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      }
+    }
+    // cat myfilie > output.txt &
+    else if (i >= 3 && strcmp(args[i], "&") == 0) {
+      args[i] = NULL;
+      should_run_in_bg = 1;
+      if (strcmp(args[i - 2], ">") == 0) {
+        out_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      } else if (strcmp(args[i - 2], "<") == 0) {
+        in_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      }
+    }
+    // cat myfile > output.txt
+    else if (i >= 3) {
+      if (strcmp(args[i - 1], ">") == 0) {
+        out_file_name = args[i];
+        args[i - 1] = NULL;
+      } else if (strcmp(args[i - 1], "<") == 0) {
+        in_file_name = args[i];
+        args[i - 1] = NULL;
+      }
+    }
+
+    /*
+    // cat myfile > output.txt #
+    if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0) {
+      args[i] = NULL;
+      if(strcmp(args[i - 2], ">") == 0) {
+        out_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      } else if (strcmp(args[i - 2], "<") == 0) {
+        in_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      }
+    }
+    // cat myfile > output.txt & #
+    if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0 && strcmp(args[i - 1], "&") == 0) {
+      args[i] = NULL;
+      should_run_in_bg = 1;
+      if(strcmp(args[i - 3], ">") == 0) {
+        out_file_name = args[i - 2];
+        args[i - 3] = NULL;
+      } else if (strcmp(args[i - 3], "<") == 0) {
+        in_file_name = args[i - 2];
+        args[i - 3] = NULL;
+      }
+    }
+    // cat myfilie > output.txt &
+    if (i >= 3 && strcmp(args[i], "&") == 0) {
+      args[i] = NULL;
+      should_run_in_bg = 1;
+      if (strcmp(args[i - 2], ">") == 0) {
+        out_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      } else if (strcmp(args[i - 2], "<") == 0) {
+        in_file_name = args[i - 1];
+        args[i - 2] = NULL;
+      }
+    }
+    // cat myfile > output.txt
+    if (i >= 3) {
+      if (strcmp(args[i - 1], ">") == 0) {
+        out_file_name = args[i];
+        args[i - 1] = NULL;
+      } else if (strcmp(args[i - 1], "<") == 0) {
+        in_file_name = args[i];
+        args[i - 1] = NULL;
+      }
+    }
+    */
+
+
+    // 
+    /*
+    i = 0;
+    while (i < args_num) {
+      if ((strcmp(args[i], "#") == 0) || i == args_num - 1) {
+        if (strcmp(args[i], "#") == 0) {
+          args[i] = NULL;
+        }
+        if (i >= 2) {
+          if (strcmp(args[i - 1], "&") == 0) {
+            should_run_in_bg = 1;
+            args[i - 1] = NULL;
+          }
+
+          if (strcmp(args[i - 2], ">") == 0) {
+            out_file_name = args[i - 2];
+          }
+
+          if (strcmp(args[i- 2], "<") == 0) {
+            in_file_name = args[i - 1];
+          }
+
+        }
+        i++;
+      }
+      i++;
+    }
+    */
+
+    /*
+    int back_pointer = args_num - 1;
+    while (back_pointer >=0) {
+      // The first occurrence of the word "#" and any additional words following it shall be ignored as a command.
+      if (strncmp(args[back_pointer], "#", 1) == 0) {
+        args[back_pointer] = NULL;
+        back_pointer--;
+        continue;
+      }
+
+      // If the last word is &, it shall indicate that the command is to be run in the background.
+      if (strcmp(args[back_pointer], "&") == 0) {
+        should_run_in_bg = 1;
+        args[back_pointer] = NULL;
+        back_pointer--;
+      }
+
+      if (back_pointer > 0 && strcmp(args[back_pointer - 1], ">") == 0) {
+        out_file_name = args[back_pointer];
+        args[back_pointer - 1] = NULL;
+        back_pointer--;
+      }
+
+      if (back_pointer > 0 && strcmp(args[back_pointer - 1], "<") == 0) {
+        in_file_name = args[back_pointer];
+        args[back_pointer - 1] = NULL;
+        back_pointer--;
+      }
+      
+      back_pointer--;
+    }
+    */
+    
+    
+    // Execution - Do I account for the comments here?
+    // Executing "exit".
+    if (strcmp(args[0], "exit") == 0) {
+      printf("EXIT COMMAND RECEIVED");
+    } 
+    //Executing "cd".
+    else if (strcmp(args[0], "cd") == 0) {
+      if (args_num > 2) {
+        fprintf(stderr, "Incorrect number of arguments\n");
+        continue;
+      } else if (args_num == 2) {
+        // Check for the error.
+        if (chdir(args[1]) != 0) {
+          fprintf(stderr, "Cannot change directory\n");
+          continue;
+        } else {
+          fprintf(stdout, "successful change of directory\n");
+        }
+      } else {
+        home_dir = getenv("HOME");
+        if (home_dir) {
+          if (chdir(home_dir) != 0) {
+            fprintf(stderr, "Cannot change directory\n");
+            continue;
+          } else {
+            fprintf(stdout, "successful change of directory\n");
+          }
+        } else {
+          // What to do if "HOME" environment variable doesn't exist?
+          fprintf(stderr, "Cannot go to HOME\n");
+          continue;
+        }
+      }
+    } 
+    // Executing built-in commands.
+    else {
+      printf("BUILT-IN");
+    }
+
+    
+         
   }
-
-return 0;
-
+  return 0;
 }
-
-/* INPUT
- *
- *
- * Managing Background Process
- *
- * Before printing a prompt message, the shell will check for any un-waited-for background 
- * processes in the same process group ID as the shell itself.  And it will print the following
- * messages to stderr:
- *
- * If exited: "Child process %d done. Exit status %d.\n", <pid>, <exit status>
- * If signaled: "Child process %d done. Signaled %d.\n", <pid>, <signal number>
- *
- * If a child process is stopped, then the shell will send it the SIGCONT signal and print the
- * following message to stderr:
- *
- * "Child process %d stopped.  Continuing.\n", <pid>"
- *
- * Any other child state changes (WIFCONTINUED) will be ignored.
- *
- *
- *
- * The prompt
- *
- * The shell will print a prompt to stderr by expanding the PS1 parameter ($ for users and # for root user).
- *
- *
- *
- * Reading a line of input
- *
- * After printing the command prompt, the shell will read a line of input from stdin (getline()).
- * If reading is interrupted by a signal, a newline will be printed, then a new command prompt will be printed,
- * including checking for background processes.  And reading a line of input will resume.  (clearerr() and reset errno).
- */
-
-
-/* INPUT SPLITTING
- *
- *
- * The input line will be split into words, delimited by the " \t\n".  A minimum of 512 words will be supported.
- */
-
-
-/* EXPANSION
- *
- *
- * Any occurrence of "~/" at the beginning of a word will be replaecd with the value of the HOME environment variable.
- * The "/" will be retained (getenv()).
- *  
- * Any occurrence of "$$" within a word will be replaced with the process ID of the shell process (getpid()).
- *
- * Any occurrence of "$?" within a word will be replaced with the exit status of the last foreground command.
- *
- * Any occurrence of "$!" within a word will be replaced with the process ID of the most recent background process.
- */
-
-
-/* PARSING
- *
- *
- * The first occurrence of the character "#" and any additional characters following it will be ignored as a comment.
- *
- * If the last character is "&", it will indicate that the command is to be run in the background.
- *
- * If the last word is immediately preceded by the character "<", it will be interpreted as the filename operand of the input
- * redirection operator.
- *
- * If the last word is immediately preceded by the character ">", it will be interpreted as the filename operand of the output
- * redirection operator.
- */
-
-
-/* EXECUTION
- *
- *
- * If at this point no command word is present, then the shell will silently return to INPUT and print a new prompt message.  
- * This is not an error and "$?" will not be modified.
- *
- *
- *
- * Built-in commands
- *
- * If the command to be executed is "exit" or "cd", the following built-in procedures will be executed.  The redirection and background
- * operators mentioned in PARSING will be ignored by built-in commands.
- *
- * exit: The "exit" built-in takes one argument.  If not provided, the argument is implied to be the expansion of "$?", the exit status
- *       of the last foreground command.  It will be an error if more than one artument is provided or if an argument provided is not an integer.
- *       This shell will print "\nexit\n" to stderr then exit with the specified (or implied) value.  All child processes in the same process group 
- *       will be sent a SIGINT signal before exiting (kill()).  The shell does not need to wait on these child processes and may exit immediately (exit()).
- *
- * cd: The "cd" built-in takes one argument.  If not provided, the argument is implied to be the expansion of "~/", the value of the HOME enrionment variable.
- *     It will be an error if more than one argument is provided.  The shell will change its own current working directory to the specified or implied path. 
- *     It will be an error if the operation fails (chdir()).
- *
- *
- *
- * Non built-in commands
- *
- * Otherwise, the command and its arguments will be executed in a new child process.  If the command name does not include a "/", the command will be searched
- * for in the system's PATH environment variable (execvp()).  If a call to fork() fails, it will be an error.  In the child process(es):
- *      - All signals will be rest to their original dispositions when the shell was first invoked.  This is not the same is SIG_DFL.  oldact() in SIGACTION.
- *      - If a filename is specified as the operand to the input ("<") redirection operator, the specified file will be opened for reading on stdin.  It will 
- *        be an error if the file cannot be opened of readhing of does not already exist.
- *      - If file name is specified as the operand to the output(">") redirection operator, the specified file will be opened for writing on stdout.  If the file
- *        does not exist, it will be created with permissions 0777.  It will be an error if the file cannot be opened or created for writing.
- *      - If the child process fails to exec (such as if the specified command cannot be found), it will be an error.
- *      - When an error occurs in the child, the child will immediately print an error mesage to stderr and exit with a non-zero exit status.
- */
-
-
-/* WAITING
- *
- *
- * 
- *
- */
