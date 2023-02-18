@@ -1,6 +1,6 @@
 // Author: Elliott Larsen
 // Date:
-// Description: Second pass with no modular approach.
+// Description: 
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -57,6 +57,11 @@ int main(void) {
   char *home_dir;
   char pid[1024];
   sprintf(pid, "%d", getpid());
+  pid_t child_pid;
+  // "$$" defaults to "0"
+  char *fg_status = "0";
+  // ""$!" defaults to "" if no background process ID is available.
+  char *bg_status = "";
   
 
   char *out_file_name = NULL;
@@ -137,10 +142,21 @@ int main(void) {
         } else {
           // What to do if there is no getenv("HOME")?
         }
-        // "$$" expansion with the shell's PID.
-        str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
-        // "$?" expansion.
-        // "$!" expansion.
+      }
+      // "$$" expansion with the shell's PID.
+      str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
+      // "$?" expansion.
+      if (strcmp(fg_status, "0") != 0) {
+        str_gsub(&args[i], "$?", fg_status, &is_home_dir_expanded);
+      } else {
+        str_gsub(&args[i], "$?", "0", &is_home_dir_expanded);
+      }
+
+      // "$!" expansion.
+      if (strcmp(bg_status, "") != 0) {
+        str_gsub(&args[i], "$!", bg_status, &is_home_dir_expanded);
+      } else {
+        str_gsub(&args[i], "$!", "", &is_home_dir_expanded);
       }
       i++;
     }
@@ -202,117 +218,6 @@ int main(void) {
         args[i - 1] = NULL;
       }
     }
-
-    /*
-    // cat myfile > output.txt #
-    if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0) {
-      args[i] = NULL;
-      if(strcmp(args[i - 2], ">") == 0) {
-        out_file_name = args[i - 1];
-        args[i - 2] = NULL;
-      } else if (strcmp(args[i - 2], "<") == 0) {
-        in_file_name = args[i - 1];
-        args[i - 2] = NULL;
-      }
-    }
-    // cat myfile > output.txt & #
-    if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0 && strcmp(args[i - 1], "&") == 0) {
-      args[i] = NULL;
-      should_run_in_bg = 1;
-      if(strcmp(args[i - 3], ">") == 0) {
-        out_file_name = args[i - 2];
-        args[i - 3] = NULL;
-      } else if (strcmp(args[i - 3], "<") == 0) {
-        in_file_name = args[i - 2];
-        args[i - 3] = NULL;
-      }
-    }
-    // cat myfilie > output.txt &
-    if (i >= 3 && strcmp(args[i], "&") == 0) {
-      args[i] = NULL;
-      should_run_in_bg = 1;
-      if (strcmp(args[i - 2], ">") == 0) {
-        out_file_name = args[i - 1];
-        args[i - 2] = NULL;
-      } else if (strcmp(args[i - 2], "<") == 0) {
-        in_file_name = args[i - 1];
-        args[i - 2] = NULL;
-      }
-    }
-    // cat myfile > output.txt
-    if (i >= 3) {
-      if (strcmp(args[i - 1], ">") == 0) {
-        out_file_name = args[i];
-        args[i - 1] = NULL;
-      } else if (strcmp(args[i - 1], "<") == 0) {
-        in_file_name = args[i];
-        args[i - 1] = NULL;
-      }
-    }
-    */
-
-
-    // 
-    /*
-    i = 0;
-    while (i < args_num) {
-      if ((strcmp(args[i], "#") == 0) || i == args_num - 1) {
-        if (strcmp(args[i], "#") == 0) {
-          args[i] = NULL;
-        }
-        if (i >= 2) {
-          if (strcmp(args[i - 1], "&") == 0) {
-            should_run_in_bg = 1;
-            args[i - 1] = NULL;
-          }
-
-          if (strcmp(args[i - 2], ">") == 0) {
-            out_file_name = args[i - 2];
-          }
-
-          if (strcmp(args[i- 2], "<") == 0) {
-            in_file_name = args[i - 1];
-          }
-
-        }
-        i++;
-      }
-      i++;
-    }
-    */
-
-    /*
-    int back_pointer = args_num - 1;
-    while (back_pointer >=0) {
-      // The first occurrence of the word "#" and any additional words following it shall be ignored as a command.
-      if (strncmp(args[back_pointer], "#", 1) == 0) {
-        args[back_pointer] = NULL;
-        back_pointer--;
-        continue;
-      }
-
-      // If the last word is &, it shall indicate that the command is to be run in the background.
-      if (strcmp(args[back_pointer], "&") == 0) {
-        should_run_in_bg = 1;
-        args[back_pointer] = NULL;
-        back_pointer--;
-      }
-
-      if (back_pointer > 0 && strcmp(args[back_pointer - 1], ">") == 0) {
-        out_file_name = args[back_pointer];
-        args[back_pointer - 1] = NULL;
-        back_pointer--;
-      }
-
-      if (back_pointer > 0 && strcmp(args[back_pointer - 1], "<") == 0) {
-        in_file_name = args[back_pointer];
-        args[back_pointer - 1] = NULL;
-        back_pointer--;
-      }
-      
-      back_pointer--;
-    }
-    */
     
     
     // Execution - Do I account for the comments here?
@@ -379,27 +284,42 @@ int main(void) {
     } 
     // Executing built-in commands.
     else {
-      pid_t child_pid = fork();
 
+      int child_status;
+      child_pid = fork();
+      printf("\nHere is child_pid from fork(): %d\n", child_pid);
+      
       switch(child_pid) {
         case -1:
-          fprintf(stderr, "fork() error.  Handle this.\n");
+          fprintf(stderr, "fork() error. Handle this.\n");
           exit(1);
           break;
 
         case 0:
-          printf("\nMessage from the child process.\n");
+          printf("Message from the child process.\n");
           execvp(args[0], args);
 
-          fprintf(stderr, "\nexecvp() error. Handle this.\n");
+          fprintf(stderr, "execvp() error. Handel this.\n");
           exit(1);
           break;
 
         default:
-          printf("\nMessage from the parent process(shell).\n");
+          //printf("Message from the shell.\n");
+          //printf("Here is child_pid from default: %d\n", child_pid);
+          if (!should_run_in_bg) {
+            printf("\nPerform a blocking wait on the foreground child process.\n");
+            child_pid = waitpid(child_pid, &child_status, 1);
+            fg_status = calloc(1024, sizeof(char));
+            //printf("Here is child_pid after waitpid: %d", child_pid);
+            sprintf(fg_status, "%d", child_pid);
+            //printf("Here is fg_status: %s", fg_status);
+          }
       }
       continue;
+      //printf("BUILT-IN");
     }
+
+
     // Free realloc() from str_gsub();
     for (int i = 0; i < args_num; i++) {
       free(args[i]);
@@ -409,3 +329,4 @@ int main(void) {
   }
   return 0;
 }
+
