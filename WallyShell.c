@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <stdint.h>
 
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded) {
   char *str = *input_line;
@@ -65,10 +66,12 @@ int main(void) {
   char pid[1024];
   sprintf(pid, "%d", getpid());
   pid_t child_pid;
+  pid_t bg_children;
   // "$$" defaults to "0"
   char *fg_status = "0";
   // ""$!" defaults to "" if no background process ID is available.
   char *bg_status = "";
+  int child_status;
   
   char *out_file_name = NULL;
   char *in_file_name = NULL;
@@ -84,12 +87,10 @@ int main(void) {
   int is_outfile = 0;
 
 
-  struct sigaction SIGINT_action = {0}, ignore_action = {0};
+  struct sigaction SIGINT_action = {0};
   // Fill up SIGINT_action struct.
   SIGINT_action.sa_handler = SIGINT_handler;
-  // Block all catchable signals while SIGINT_handler is running.
   sigfillset(&SIGINT_action.sa_mask);
-  // No flags set.
   SIGINT_action.sa_flags = 0;
   sigaction(SIGINT, &SIGINT_action, NULL);
   // SIGTSTP normally causes a process to halt, which is undesireable.  This shell does not respond to this signal and it sets its disposition to SIG_IGN.
@@ -97,28 +98,48 @@ int main(void) {
 
   for (;;) {
     // Reset variables.
+    child_pid = -5;
     tokens = NULL;
     args_num = 0;
-
     should_run_in_bg = 0;
 
     // Managing Background Processes
     
+    bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
+    while (bg_children > 0) {
+      fflush(stdout);
+
+      if (WIFEXITED(child_status)) {
+        fprintf(stderr, "Child process %jd done.  Exit status %d.\n", (intmax_t)bg_children, WEXITSTATUS(child_status));
+      }
+      if (WIFSIGNALED(child_status)) {
+        fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t)bg_children, WTERMSIG(child_status));
+      }
+      if (WIFSTOPPED(child_status)) {
+        kill(bg_children, SIGCONT);
+        fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)bg_children, WSTOPSIG(child_status));
+      }
+      fflush(stderr);
+      bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
+
+    }
     
     // Prompt
     char *prompt;
     if (!(prompt = getenv("PS1"))) {
       prompt = "\0";
     }
+    fflush(stdout);
     fprintf(stderr, "%s", prompt);
     fflush(stderr);
 
+    // Register SIGTSTP to be ignored.
     ssize_t line_length = getline(&user_input, &n, stdin);
 
     // Error from reading an input.
     if (line_length == -1) {
       clearerr(stderr);
-      clearerr(stdin);
+      //clearerr(stdin);
       errno = 0;
       continue;
     }
@@ -135,8 +156,9 @@ int main(void) {
         args[args_num] = strdup(tokens);
         args_num += 1;
       } else {
-        // free args?
+        fflush(stdout);
         fprintf(stderr, "\nString split error\n");
+        fflush(stderr);
         exit(1);
       }
       tokens = strtok(NULL, IFS);
@@ -151,11 +173,18 @@ int main(void) {
 
 
     // Expansion
-    // If args[0] is not a command or a comment? Should I worry about it in the Execusion stage?
-
     int i = 0;
     while (i < args_num && args[i] != NULL) {
       // "~/" expansion with the HOME environment variable.
+      is_home_dir_expanded = 0;
+      if (!(home_dir = getenv("HOME"))) {
+        home_dir = "";
+      }
+      if (strncmp(args[i], "~/", 2) == 0) {
+        is_home_dir_expanded = 1;
+        str_gsub(&args[i], "~", home_dir, &is_home_dir_expanded);
+      }
+      /*
       is_home_dir_expanded = 0;
       if (strncmp(args[i], "~/", 2) == 0) {
         home_dir = getenv("HOME");
@@ -165,7 +194,8 @@ int main(void) {
         } else {
           // What to do if there is no getenv("HOME")?
         }
-      }
+      }*/
+
       // "$$" expansion with the shell's PID.
       str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
       // "$?" expansion.
@@ -273,28 +303,41 @@ int main(void) {
     if (strcmp(args[0], "exit") == 0) {
       if (args_num > 2) {
         // If too many arguments are given.
+        fflush(stdout);
         fprintf(stderr, "'exit' command takes only one argument.\n");
+        fflush(stderr);
         exit(1);
       }
 
       if (args_num == 2) {
         if (isdigit(*args[1]) == 0) {
           // Correct number of argument is given but it is not an integer.
+          fflush(stdout);
           fprintf(stderr, "'exit' command only takes an integer argument.\n");
+          fflush(stderr);
           exit(1);
         } else {
           // Correct number of argument is given and it IS an integer.
           //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
-          exit(0);
+          child_pid = waitpid(0, &child_status, WNOHANG);
+          kill(child_pid, SIGINT);
+          //while (child_pid) {
+          //  kill(child_pid, SIGINT);
+          //  child_pid = waitpid(0, &child_status, WNOHANG);
+          //}
+          fflush(stdout);
+          fprintf(stderr, "\nexit\n");
+          exit(atoi(args[1]));
         }
       } else {
         // No argument is given so it exits.
         //printf("Expand $? and exit.\n");
         //printf("%d", atoi(fg_status));
+        fflush(stdout);
         fprintf(stderr, "\nexit\n");
+        fflush(stderr);
         exit(atoi(fg_status));
       }
-
     }
 
     
@@ -302,14 +345,18 @@ int main(void) {
     else if (strcmp(args[0], "cd") == 0) {
       int cd_result;
       if (args_num > 2) {
+        fflush(stdout);
         fprintf(stderr, "Incorrect number of arguments.\n");
+        fflush(stderr);
         continue;
       }
 
       else if (args_num == 2) {
         cd_result = chdir(args[1]);
         if (cd_result != 0) {
+          fflush(stdout);
           fprintf(stderr, "Cannot change directory.\n");
+          fflush(stderr);
         }
       }
 
@@ -318,62 +365,27 @@ int main(void) {
         if (home_dir) {
           cd_result = chdir(home_dir);
           if (cd_result != 0) {
+            fflush(stdout);
             fprintf(stderr, "Cannot change directory to home.\n");
+            fflush(stderr);
           }
         } else {
+          fflush(stdout);
           fprintf(stderr, "getenv('HOME') failed.");
+          fflush(stderr);
         }
       }
     }
-    /*
-    else if (strcmp(args[0], "cd") == 0) {
-      if (args_num > 2) {
-        // If cd is given more than one argument.
-        fprintf(stderr, "Incorrect number of arguments\n");
-        continue;
-      } 
-
-      else if (args_num == 2) {
-        // If cd is given exactly one artument.
-        // Check for the error.
-        if (chdir(args[1]) != 0) {
-          // If chdir cannot be performed with the argument given, restart the main loop.
-          fprintf(stderr, "Cannot change directory\n");
-          continue;
-        } else {
-          // If chdir with the given argument is successful.
-          //fprintf(stdout, "successful change of directory\n");
-        }
-      } 
-
-      else {
-        // If there is no argument given to cd.
-        home_dir = getenv("HOME");
-        if (home_dir) {
-          if (chdir(home_dir) != 0) {
-            fprintf(stderr, "Cannot change directory\n");
-            continue;
-          } else {
-            //fprintf(stdout, "successful change of directory\n");
-          }
-        } else {
-          // What to do if "HOME" environment variable doesn't exist?
-          fprintf(stderr, "Cannot go to HOME\n");
-          continue;
-        }
-      }
-    } 
-    */
     // Executing built-in commands.
     else {
-
-      int child_status;
       child_pid = fork();
       //printf("\nHere is child_pid from fork(): %d\n", child_pid);
       
       switch(child_pid) {
         case -1:
+          fflush(stdout);
           fprintf(stderr, "fork() error. Handle this.\n");
+          fflush(stderr);
           exit(1);
           break;
 
@@ -382,13 +394,17 @@ int main(void) {
           if (is_infile) {
             infile_descriptor = open(in_file_name, O_RDONLY);
             if (infile_descriptor == -1) {
+              fflush(stdout);
               fprintf(stderr, "open() error for input redirection.");
+              fflush(stderr);
               exit(1);
             }
             // stdin file descriptor is 0.
             redirection_result = dup2(infile_descriptor, 0);
             if (redirection_result == -1) {
+              fflush(stdout);
               fprintf(stderr, "dup2() error from input redirection.");
+              fflush(stderr);
               exit(1);
             }
             // Is this it?  More things to do?
@@ -397,12 +413,16 @@ int main(void) {
           if (is_outfile) {
             outfile_descriptor = open(out_file_name, O_RDWR | O_CREAT, 0777);
             if (outfile_descriptor == -1) {
+              fflush(stdout);
               fprintf(stderr, "open() error for output redirection.");
+              fflush(stderr);
             }
             // stdout file decriptor is 1.
             redirection_result = dup2(outfile_descriptor, 1);
             if (redirection_result == -1) {
+              fflush(stdout);
               fprintf(stderr, "dup2() error from output redirection.");
+              fflush(stderr);
               exit(1);
             }
           }
@@ -411,7 +431,9 @@ int main(void) {
           // Error check for execvp.
           execvp(args[0], args);
 
+          fflush(stdout);
           fprintf(stderr, "execvp() error. Handle this.\n");
+          fflush(stderr);
           exit(1);
           break;
 
