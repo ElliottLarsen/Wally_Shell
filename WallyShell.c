@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <ctype.h>
+#include <fcntl.h>
 
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded) {
   char *str = *input_line;
@@ -69,14 +70,18 @@ int main(void) {
   // ""$!" defaults to "" if no background process ID is available.
   char *bg_status = "";
   
-
   char *out_file_name = NULL;
   char *in_file_name = NULL;
   char *args[1024 + 5] = {NULL};
   char *tokens = NULL;
+  int infile_descriptor;
+  int outfile_descriptor;
+  int redirection_result;
 
   int is_home_dir_expanded = 0;
   int should_run_in_bg = 0;
+  int is_infile = 0;
+  int is_outfile = 0;
 
 
   struct sigaction SIGINT_action = {0}, ignore_action = {0};
@@ -198,9 +203,11 @@ int main(void) {
       if(strcmp(args[i - 3], ">") == 0) {
         out_file_name = args[i - 2];
         args[i - 3] = NULL;
+        is_outfile = 1;
       } else if (strcmp(args[i - 3], "<") == 0) {
         in_file_name = args[i - 2];
         args[i - 3] = NULL;
+        is_infile = 1;
       }
     }
     // cat myfile > output.txt #
@@ -209,9 +216,11 @@ int main(void) {
       if(strcmp(args[i - 2], ">") == 0) {
         out_file_name = args[i - 1];
         args[i - 2] = NULL;
+        is_outfile = 1;
       } else if (strcmp(args[i - 2], "<") == 0) {
         in_file_name = args[i - 1];
         args[i - 2] = NULL;
+        is_infile = 1;
       }
     }
     // cat myfilie > output.txt &
@@ -221,19 +230,23 @@ int main(void) {
       if (strcmp(args[i - 2], ">") == 0) {
         out_file_name = args[i - 1];
         args[i - 2] = NULL;
+        is_outfile = 1;
       } else if (strcmp(args[i - 2], "<") == 0) {
         in_file_name = args[i - 1];
         args[i - 2] = NULL;
+        is_infile = 1;
       }
     }
     // cat myfile > output.txt
     else if (i >= 3) {
       if (strcmp(args[i - 1], ">") == 0) {
         out_file_name = args[i];
+        is_outfile = 1;
         args[i - 1] = NULL;
       } else if (strcmp(args[i - 1], "<") == 0) {
         in_file_name = args[i];
         args[i - 1] = NULL;
+        is_infile = 1;
       }
     }
    
@@ -365,10 +378,40 @@ int main(void) {
           break;
 
         case 0:
+          // All signals should be reset to their original dispositions when the shell was invoked.
+          if (is_infile) {
+            infile_descriptor = open(in_file_name, O_RDONLY);
+            if (infile_descriptor == -1) {
+              fprintf(stderr, "open() error for input redirection.");
+              exit(1);
+            }
+            // stdin file descriptor is 0.
+            redirection_result = dup2(infile_descriptor, 0);
+            if (redirection_result == -1) {
+              fprintf(stderr, "dup2() error from input redirection.");
+              exit(1);
+            }
+            // Is this it?  More things to do?
+          }
+
+          if (is_outfile) {
+            outfile_descriptor = open(out_file_name, O_RDWR | O_CREAT, 0777);
+            if (outfile_descriptor == -1) {
+              fprintf(stderr, "open() error for output redirection.");
+            }
+            // stdout file decriptor is 1.
+            redirection_result = dup2(outfile_descriptor, 1);
+            if (redirection_result == -1) {
+              fprintf(stderr, "dup2() error from output redirection.");
+              exit(1);
+            }
+          }
+
           //printf("Message from the child process.\n");
+          // Error check for execvp.
           execvp(args[0], args);
 
-          fprintf(stderr, "execvp() error. Handel this.\n");
+          fprintf(stderr, "execvp() error. Handle this.\n");
           exit(1);
           break;
 
