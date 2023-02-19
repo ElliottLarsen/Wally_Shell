@@ -1,6 +1,6 @@
 // Author: Elliott Larsen
 // Date:
-// Description: 
+// Description: Second pass with no modular approach.
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -49,6 +49,12 @@ char *str_gsub(char *restrict *restrict input_line, char const *restrict old_wor
     return str;
 }
 
+void SIGINT_handler(int signo) {
+  char *message = "\nCaught SIGINT\n";
+  write(STDOUT_FILENO, message, 16);
+  raise(SIGUSR2);
+}
+
 int main(void) {
   char *user_input = NULL;
   int args_num = 0;
@@ -71,6 +77,18 @@ int main(void) {
 
   int is_home_dir_expanded = 0;
   int should_run_in_bg = 0;
+
+
+  struct sigaction SIGINT_action = {0}, ignore_action = {0};
+  // Fill up SIGINT_action struct.
+  SIGINT_action.sa_handler = SIGINT_handler;
+  // Block all catchable signals while SIGINT_handler is running.
+  sigfillset(&SIGINT_action.sa_mask);
+  // No flags set.
+  SIGINT_action.sa_flags = 0;
+  sigaction(SIGINT, &SIGINT_action, NULL);
+  // SIGTSTP normally causes a process to halt, which is undesireable.  This shell does not respond to this signal and it sets its disposition to SIG_IGN.
+  signal(SIGTSTP, SIG_IGN);
 
   for (;;) {
     // Reset variables.
@@ -113,7 +131,7 @@ int main(void) {
         args_num += 1;
       } else {
         // free args?
-        printf("\nString split error\n");
+        fprintf(stderr, "\nString split error\n");
         exit(1);
       }
       tokens = strtok(NULL, IFS);
@@ -218,7 +236,24 @@ int main(void) {
         args[i - 1] = NULL;
       }
     }
-    
+   
+    else if (i >= 2 && strcmp(args[i], "#") == 0) {
+      args[i] = NULL;
+    }
+
+    else if (i >= 2 && strcmp(args[i], "&") == 0) {
+      should_run_in_bg = 1;
+      args[i] = NULL;
+    }
+
+    else if (i >= 1 && strcmp(args[i], "#") == 0) {
+      args[i] = NULL;
+    }
+
+    else if (i >= 1 && strcmp(args[i], "&") == 0) {
+      should_run_in_bg = 1;
+      args[i] = NULL;
+    }
     
     // Execution - Do I account for the comments here?
     // Executing "exit".
@@ -236,13 +271,15 @@ int main(void) {
           exit(1);
         } else {
           // Correct number of argument is given and it IS an integer.
-          printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
+          //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
           exit(0);
         }
       } else {
         // No argument is given so it exits.
-        printf("Expand $? and exit.\n");
-        exit(0);
+        //printf("Expand $? and exit.\n");
+        //printf("%d", atoi(fg_status));
+        fprintf(stderr, "\nexit\n");
+        exit(atoi(fg_status));
       }
 
     }
@@ -250,11 +287,40 @@ int main(void) {
     
     // Executing "cd".
     else if (strcmp(args[0], "cd") == 0) {
+      int cd_result;
+      if (args_num > 2) {
+        fprintf(stderr, "Incorrect number of arguments.\n");
+        continue;
+      }
+
+      else if (args_num == 2) {
+        cd_result = chdir(args[1]);
+        if (cd_result != 0) {
+          fprintf(stderr, "Cannot change directory.\n");
+        }
+      }
+
+      else {
+        home_dir = getenv("HOME");
+        if (home_dir) {
+          cd_result = chdir(home_dir);
+          if (cd_result != 0) {
+            fprintf(stderr, "Cannot change directory to home.\n");
+          }
+        } else {
+          fprintf(stderr, "getenv('HOME') failed.");
+        }
+      }
+    }
+    /*
+    else if (strcmp(args[0], "cd") == 0) {
       if (args_num > 2) {
         // If cd is given more than one argument.
         fprintf(stderr, "Incorrect number of arguments\n");
         continue;
-      } else if (args_num == 2) {
+      } 
+
+      else if (args_num == 2) {
         // If cd is given exactly one artument.
         // Check for the error.
         if (chdir(args[1]) != 0) {
@@ -263,9 +329,11 @@ int main(void) {
           continue;
         } else {
           // If chdir with the given argument is successful.
-          fprintf(stdout, "successful change of directory\n");
+          //fprintf(stdout, "successful change of directory\n");
         }
-      } else {
+      } 
+
+      else {
         // If there is no argument given to cd.
         home_dir = getenv("HOME");
         if (home_dir) {
@@ -273,7 +341,7 @@ int main(void) {
             fprintf(stderr, "Cannot change directory\n");
             continue;
           } else {
-            fprintf(stdout, "successful change of directory\n");
+            //fprintf(stdout, "successful change of directory\n");
           }
         } else {
           // What to do if "HOME" environment variable doesn't exist?
@@ -282,12 +350,13 @@ int main(void) {
         }
       }
     } 
+    */
     // Executing built-in commands.
     else {
 
       int child_status;
       child_pid = fork();
-      printf("\nHere is child_pid from fork(): %d\n", child_pid);
+      //printf("\nHere is child_pid from fork(): %d\n", child_pid);
       
       switch(child_pid) {
         case -1:
@@ -296,7 +365,7 @@ int main(void) {
           break;
 
         case 0:
-          printf("Message from the child process.\n");
+          //printf("Message from the child process.\n");
           execvp(args[0], args);
 
           fprintf(stderr, "execvp() error. Handel this.\n");
@@ -307,12 +376,15 @@ int main(void) {
           //printf("Message from the shell.\n");
           //printf("Here is child_pid from default: %d\n", child_pid);
           if (!should_run_in_bg) {
-            printf("\nPerform a blocking wait on the foreground child process.\n");
+            //printf("\nPerform a blocking wait on the foreground child process.\n");
             child_pid = waitpid(child_pid, &child_status, 1);
             fg_status = calloc(1024, sizeof(char));
             //printf("Here is child_pid after waitpid: %d", child_pid);
             sprintf(fg_status, "%d", child_pid);
             //printf("Here is fg_status: %s", fg_status);
+          } else {
+            bg_status = calloc(1024, sizeof(char));
+            sprintf(bg_status, "%d", child_pid);
           }
       }
       continue;
@@ -324,8 +396,6 @@ int main(void) {
     for (int i = 0; i < args_num; i++) {
       free(args[i]);
     }
-
-  
   }
   return 0;
 }
