@@ -1,6 +1,6 @@
 // Author: Elliott Larsen
 // Date:
-// Description: Second pass with no modular approach.
+// Description: 
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -17,7 +17,6 @@
 #include <stddef.h>
 #include <ctype.h>
 #include <fcntl.h>
-#include <stdint.h>
 
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded) {
   char *str = *input_line;
@@ -66,12 +65,10 @@ int main(void) {
   char pid[1024];
   sprintf(pid, "%d", getpid());
   pid_t child_pid;
-  pid_t bg_children;
   // "$$" defaults to "0"
   char *fg_status = "0";
   // ""$!" defaults to "" if no background process ID is available.
   char *bg_status = "";
-  int child_status;
   
   char *out_file_name = NULL;
   char *in_file_name = NULL;
@@ -105,24 +102,6 @@ int main(void) {
 
     // Managing Background Processes
     
-    bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
-    while (bg_children > 0) {
-      fflush(stdout);
-
-      if (WIFEXITED(child_status)) {
-        fprintf(stderr, "Child process %jd done.  Exit status %d.\n", (intmax_t)bg_children, WEXITSTATUS(child_status));
-      }
-      if (WIFSIGNALED(child_status)) {
-        fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t)bg_children, WTERMSIG(child_status));
-      }
-      if (WIFSTOPPED(child_status)) {
-        kill(bg_children, SIGCONT);
-        fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)bg_children, WSTOPSIG(child_status));
-      }
-      fflush(stderr);
-      bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
-
-    }
     
     // Prompt
     char *prompt;
@@ -135,6 +114,7 @@ int main(void) {
 
     // Register SIGTSTP to be ignored.
     ssize_t line_length = getline(&user_input, &n, stdin);
+    user_input[strlen(user_input) - 1] = '\0';
 
     // Error from reading an input.
     if (line_length == -1) {
@@ -184,17 +164,6 @@ int main(void) {
         is_home_dir_expanded = 1;
         str_gsub(&args[i], "~", home_dir, &is_home_dir_expanded);
       }
-      /*
-      is_home_dir_expanded = 0;
-      if (strncmp(args[i], "~/", 2) == 0) {
-        home_dir = getenv("HOME");
-        if (home_dir) {
-          is_home_dir_expanded = 1;
-          str_gsub(&args[i], "~", home_dir, &is_home_dir_expanded);
-        } else {
-          // What to do if there is no getenv("HOME")?
-        }
-      }*/
 
       // "$$" expansion with the shell's PID.
       str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
@@ -213,8 +182,6 @@ int main(void) {
       }
       i++;
     }
-
-
 
     // Parsing
     i = 0;
@@ -319,15 +286,7 @@ int main(void) {
         } else {
           // Correct number of argument is given and it IS an integer.
           //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
-          child_pid = waitpid(0, &child_status, WNOHANG);
-          kill(child_pid, SIGINT);
-          //while (child_pid) {
-          //  kill(child_pid, SIGINT);
-          //  child_pid = waitpid(0, &child_status, WNOHANG);
-          //}
-          fflush(stdout);
-          fprintf(stderr, "\nexit\n");
-          exit(atoi(args[1]));
+          exit(0);
         }
       } else {
         // No argument is given so it exits.
@@ -338,6 +297,7 @@ int main(void) {
         fflush(stderr);
         exit(atoi(fg_status));
       }
+      goto free;
     }
 
     
@@ -348,7 +308,7 @@ int main(void) {
         fflush(stdout);
         fprintf(stderr, "Incorrect number of arguments.\n");
         fflush(stderr);
-        continue;
+        goto free;
       }
 
       else if (args_num == 2) {
@@ -375,9 +335,12 @@ int main(void) {
           fflush(stderr);
         }
       }
+      goto free;
     }
     // Executing built-in commands.
     else {
+
+      int child_status;
       child_pid = fork();
       //printf("\nHere is child_pid from fork(): %d\n", child_pid);
       
@@ -442,7 +405,7 @@ int main(void) {
           //printf("Here is child_pid from default: %d\n", child_pid);
           if (!should_run_in_bg) {
             //printf("\nPerform a blocking wait on the foreground child process.\n");
-            child_pid = waitpid(child_pid, &child_status, 1);
+            child_pid = waitpid(child_pid, &child_status, 0);
             fg_status = calloc(1024, sizeof(char));
             //printf("Here is child_pid after waitpid: %d", child_pid);
             sprintf(fg_status, "%d", child_pid);
@@ -451,17 +414,20 @@ int main(void) {
             bg_status = calloc(1024, sizeof(char));
             sprintf(bg_status, "%d", child_pid);
           }
+          goto free;
+      
       }
-      continue;
+      //continue;
       //printf("BUILT-IN");
     }
 
-
+free:
     // Free realloc() from str_gsub();
     for (int i = 0; i < args_num; i++) {
       free(args[i]);
+      args[i] = NULL;
     }
+    continue;
   }
   return 0;
 }
-
