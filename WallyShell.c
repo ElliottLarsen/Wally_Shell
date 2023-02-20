@@ -63,7 +63,7 @@ int main(void) {
   char *IFS;
   char *home_dir;
   char pid[1024];
-  sprintf(pid, "%d", getpid());
+  //sprintf(pid, "%d", getpid());
   pid_t child_pid;
   // "$$" defaults to "0"
   char *fg_status = "0";
@@ -84,14 +84,15 @@ int main(void) {
   int is_outfile = 0;
 
 
-  struct sigaction SIGINT_action = {0};
+  //struct sigaction SIGINT_action = {0};
   // Fill up SIGINT_action struct.
-  SIGINT_action.sa_handler = SIGINT_handler;
-  sigfillset(&SIGINT_action.sa_mask);
-  SIGINT_action.sa_flags = 0;
-  sigaction(SIGINT, &SIGINT_action, NULL);
+  //SIGINT_action.sa_handler = SIGINT_handler;
+  //sigfillset(&SIGINT_action.sa_mask);
+  //SIGINT_action.sa_flags = 0;
+  //sigaction(SIGINT, &SIGINT_action, NULL);
   // SIGTSTP normally causes a process to halt, which is undesireable.  This shell does not respond to this signal and it sets its disposition to SIG_IGN.
   signal(SIGTSTP, SIG_IGN);
+  signal(SIGINT, SIG_IGN);
 
   for (;;) {
     // Reset variables.
@@ -99,6 +100,14 @@ int main(void) {
     tokens = NULL;
     args_num = 0;
     should_run_in_bg = 0;
+    in_file_name = NULL;
+    out_file_name = NULL;
+    is_infile = 0;
+    is_outfile = 0;
+    infile_descriptor = -5;
+    outfile_descriptor = -5;
+    redirection_result = -5;
+    sprintf(pid, "%d", getpid());
 
     // Managing Background Processes
     
@@ -114,6 +123,7 @@ int main(void) {
 
     // Register SIGTSTP to be ignored.
     ssize_t line_length = getline(&user_input, &n, stdin);
+    // Remove "\n".
     user_input[strlen(user_input) - 1] = '\0';
 
     // Error from reading an input.
@@ -167,6 +177,10 @@ int main(void) {
 
       // "$$" expansion with the shell's PID.
       str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
+      str_gsub(&args[i], "$?", fg_status, &is_home_dir_expanded);
+      str_gsub(&args[i], "$!", bg_status, &is_home_dir_expanded);
+
+      /*
       // "$?" expansion.
       if (strcmp(fg_status, "0") != 0) {
         str_gsub(&args[i], "$?", fg_status, &is_home_dir_expanded);
@@ -180,6 +194,9 @@ int main(void) {
       } else {
         str_gsub(&args[i], "$!", "", &is_home_dir_expanded);
       }
+      */
+
+
       i++;
     }
 
@@ -264,8 +281,8 @@ int main(void) {
       should_run_in_bg = 1;
       args[i] = NULL;
     }
-    
-    // Execution - Do I account for the comments here?
+   
+
     // Executing "exit".
     if (strcmp(args[0], "exit") == 0) {
       if (args_num > 2) {
@@ -284,9 +301,11 @@ int main(void) {
           fflush(stderr);
           exit(1);
         } else {
+          fprintf(stderr, "\nexit\n");
+          kill(getpid(), SIGINT);
           // Correct number of argument is given and it IS an integer.
           //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
-          exit(0);
+          exit(atoi(args[1]));
         }
       } else {
         // No argument is given so it exits.
@@ -393,6 +412,14 @@ int main(void) {
           //printf("Message from the child process.\n");
           // Error check for execvp.
           execvp(args[0], args);
+
+          if (is_infile) {
+            close(infile_descriptor);
+          }
+
+          if (is_outfile) {
+            close(outfile_descriptor);
+          }
 
           fflush(stdout);
           fprintf(stderr, "execvp() error. Handle this.\n");
