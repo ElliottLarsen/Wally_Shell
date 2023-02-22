@@ -17,54 +17,34 @@
 #include <stddef.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <stdint.h>
 
-char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded) {
-  char *str = *input_line;
-  size_t input_line_len = strlen(str);
-  size_t const old_word_len = strlen(old_word), new_word_len = strlen(new_word);
+char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded);
+void split_input(int *args_num, char *IFS, char *tokens, char *user_input, char *args[1029]);
 
-  for (; (str = strstr(str, old_word)); ) {
-    ptrdiff_t off = str - *input_line;
-    if (new_word_len > old_word_len) {
-      str = realloc(*input_line, sizeof **input_line * (input_line_len + new_word_len - old_word_len + 1));
-      if (!str) goto exit;
-      *input_line = str;
-      str = *input_line + off;
-    }
-    memmove(str + new_word_len , str + old_word_len, input_line_len + 1 - off - old_word_len);
-    memcpy(str, new_word, new_word_len);
-    input_line_len = input_line_len + new_word_len - old_word_len;
-    str += new_word_len;
-
-    if (is_home_dir_expanded) goto exit;
-  }
-
-  str = *input_line;
-  if(new_word_len < old_word_len) {
-    str = realloc(*input_line, sizeof **input_line * (input_line_len + 1));
-    if (!str) goto exit;
-    *input_line = str;
-  }
-  
-  exit:
-    return str;
-}
+void expand_input(int *args_num, int *is_home_dir_expanded, char *home_dir, char pid[1024], char *fg_status, char *bg_status, char *args[1029]);
+int is_invalid_input(int *args_num, char *args[1029]);
 
 void SIGINT_handler(int signo) {
-  char *message = "\nCaught SIGINT\n";
-  write(STDOUT_FILENO, message, 16);
-  raise(SIGUSR2);
+  //char *message = "\nCaught SIGINT\n";
+  //write(STDOUT_FILENO, message, 16);
+  //raise(SIGUSR2);
+}
+
+void SIGINT_default(int signo) {
+  exit(0);
 }
 
 int main(void) {
   char *user_input = NULL;
   int args_num = 0;
   size_t n = 0;
-  char *IFS;
+  char *IFS = " \t\n";
   char *home_dir;
   char pid[1024];
   //sprintf(pid, "%d", getpid());
   pid_t child_pid;
+  pid_t bg_children;
   // "$$" defaults to "0"
   char *fg_status = "0";
   // ""$!" defaults to "" if no background process ID is available.
@@ -77,6 +57,7 @@ int main(void) {
   int infile_descriptor;
   int outfile_descriptor;
   int redirection_result;
+  int child_status;
 
   int is_home_dir_expanded = 0;
   int should_run_in_bg = 0;
@@ -92,7 +73,18 @@ int main(void) {
   //sigaction(SIGINT, &SIGINT_action, NULL);
   // SIGTSTP normally causes a process to halt, which is undesireable.  This shell does not respond to this signal and it sets its disposition to SIG_IGN.
   signal(SIGTSTP, SIG_IGN);
-  signal(SIGINT, SIG_IGN);
+  //signal(SIGINT, SIG_IGN);
+  struct sigaction old_sigint = {0};
+  old_sigint.sa_handler = SIGINT_default; 
+  sigfillset(&old_sigint.sa_mask);
+  old_sigint.sa_flags = 0;
+
+  struct sigaction sigactIgnore = {0};
+  sigactIgnore.sa_handler = SIG_IGN;
+  sigfillset(&sigactIgnore.sa_mask);
+  sigactIgnore.sa_flags = 0;
+
+  sigaction(SIGINT, &sigactIgnore, &old_sigint);
 
   for (;;) {
     // Reset variables.
@@ -110,6 +102,24 @@ int main(void) {
     sprintf(pid, "%d", getpid());
 
     // Managing Background Processes
+    bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
+    while (bg_children > 0) {
+      fflush(stdout);
+
+      if (WIFEXITED(child_status)) {
+        fprintf(stderr, "Child process %jd done.  Exit status %d.\n", (intmax_t)bg_children, WEXITSTATUS(child_status));
+      }
+      if (WIFSIGNALED(child_status)) {
+        fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t)bg_children, WTERMSIG(child_status));
+      }
+      if (WIFSTOPPED(child_status)) {
+        kill(bg_children, SIGCONT);
+        fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)bg_children, WSTOPSIG(child_status));
+      }
+      fflush(stderr);
+      bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
+    }
+
     
     
     // Prompt
@@ -134,74 +144,18 @@ int main(void) {
       continue;
     }
 
-    // Word Splitting.
-    IFS = getenv("IFS");
-    if (IFS == NULL) {
-      IFS = " \t\n";
-    }
+    split_input(&args_num, IFS, tokens, user_input, args);
 
-    tokens = strtok(user_input, IFS);
-    while (tokens != NULL) {
-      if (strdup(tokens) != NULL) {
-        args[args_num] = strdup(tokens);
-        args_num += 1;
-      } else {
-        fflush(stdout);
-        fprintf(stderr, "\nString split error\n");
-        fflush(stderr);
-        exit(1);
-      }
-      tokens = strtok(NULL, IFS);
-    }
-
-
-    // If no input is given.
-    if (args_num == 0 || (strcmp(args[0], "#") == 0) || (strncmp(args[0], "#", 1) == 0)) {
+    if (is_invalid_input(&args_num, args)) {
       continue;
     }
 
 
+    expand_input(&args_num, &is_home_dir_expanded, home_dir, pid, fg_status, bg_status, args);
 
-    // Expansion
-    int i = 0;
-    while (i < args_num && args[i] != NULL) {
-      // "~/" expansion with the HOME environment variable.
-      is_home_dir_expanded = 0;
-      if (!(home_dir = getenv("HOME"))) {
-        home_dir = "";
-      }
-      if (strncmp(args[i], "~/", 2) == 0) {
-        is_home_dir_expanded = 1;
-        str_gsub(&args[i], "~", home_dir, &is_home_dir_expanded);
-      }
-
-      // "$$" expansion with the shell's PID.
-      str_gsub(&args[i], "$$", pid, &is_home_dir_expanded);
-      str_gsub(&args[i], "$?", fg_status, &is_home_dir_expanded);
-      str_gsub(&args[i], "$!", bg_status, &is_home_dir_expanded);
-
-      /*
-      // "$?" expansion.
-      if (strcmp(fg_status, "0") != 0) {
-        str_gsub(&args[i], "$?", fg_status, &is_home_dir_expanded);
-      } else {
-        str_gsub(&args[i], "$?", "0", &is_home_dir_expanded);
-      }
-
-      // "$!" expansion.
-      if (strcmp(bg_status, "") != 0) {
-        str_gsub(&args[i], "$!", bg_status, &is_home_dir_expanded);
-      } else {
-        str_gsub(&args[i], "$!", "", &is_home_dir_expanded);
-      }
-      */
-
-
-      i++;
-    }
 
     // Parsing
-    i = 0;
+    int i = 0;
     // Find the index number to either # or end of the input.
     while (i < args_num) {
       if ((strcmp(args[i], "#") == 0) || i == args_num -1) {
@@ -257,10 +211,22 @@ int main(void) {
         out_file_name = args[i];
         is_outfile = 1;
         args[i - 1] = NULL;
+        if (strcmp(args[i - 3], "<") == 0) {
+          in_file_name = args[i - 2];
+          args[i - 2] = NULL;
+          is_infile = 1;
+          args[i - 3] = NULL;
+        }
       } else if (strcmp(args[i - 1], "<") == 0) {
         in_file_name = args[i];
         args[i - 1] = NULL;
         is_infile = 1;
+        if (strcmp(args[i - 3], ">") == 0) {
+          out_file_name = args[i - 2];
+          args[i - 2] = NULL;
+          is_outfile = 1;
+          args[i - 3] = NULL;
+        }
       }
     }
    
@@ -359,7 +325,6 @@ int main(void) {
     // Executing built-in commands.
     else {
 
-      int child_status;
       child_pid = fork();
       //printf("\nHere is child_pid from fork(): %d\n", child_pid);
       
@@ -373,6 +338,7 @@ int main(void) {
 
         case 0:
           // All signals should be reset to their original dispositions when the shell was invoked.
+          sigaction(SIGINT, &old_sigint, NULL);
           if (is_infile) {
             infile_descriptor = open(in_file_name, O_RDONLY);
             if (infile_descriptor == -1) {
@@ -435,7 +401,21 @@ int main(void) {
             child_pid = waitpid(child_pid, &child_status, 0);
             fg_status = calloc(1024, sizeof(char));
             //printf("Here is child_pid after waitpid: %d", child_pid);
-            sprintf(fg_status, "%d", child_pid);
+            if (WIFSIGNALED(child_status)) {
+              sprintf(fg_status, "%d", 128 + WTERMSIG(child_status));
+            } 
+
+            else if (WIFSTOPPED(child_status)) {
+              kill(child_pid, SIGCONT);
+              fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)child_pid);
+              if (should_run_in_bg) {
+                sprintf(bg_status, "%d", child_pid);
+              }
+            }
+
+            else {
+              sprintf(fg_status, "%d", WEXITSTATUS(child_status));
+            }
             //printf("Here is fg_status: %s", fg_status);
           } else {
             bg_status = calloc(1024, sizeof(char));
@@ -455,6 +435,88 @@ free:
       args[i] = NULL;
     }
     continue;
+  }
+  return 0;
+}
+
+char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded) {
+  char *str = *input_line;
+  size_t input_line_len = strlen(str);
+  size_t const old_word_len = strlen(old_word), new_word_len = strlen(new_word);
+
+  for (; (str = strstr(str, old_word)); ) {
+    ptrdiff_t off = str - *input_line;
+    if (new_word_len > old_word_len) {
+      str = realloc(*input_line, sizeof **input_line * (input_line_len + new_word_len - old_word_len + 1));
+      if (!str) goto exit;
+      *input_line = str;
+      str = *input_line + off;
+    }
+    memmove(str + new_word_len , str + old_word_len, input_line_len + 1 - off - old_word_len);
+    memcpy(str, new_word, new_word_len);
+    input_line_len = input_line_len + new_word_len - old_word_len;
+    str += new_word_len;
+
+    if (is_home_dir_expanded) goto exit;
+  }
+
+  str = *input_line;
+  if(new_word_len < old_word_len) {
+    str = realloc(*input_line, sizeof **input_line * (input_line_len + 1));
+    if (!str) goto exit;
+    *input_line = str;
+  }
+  
+  exit:
+    return str;
+}
+
+void split_input(int *args_num, char *IFS, char *tokens, char *user_input, char *args[1029]) {
+  IFS = getenv("IFS");
+  if (IFS == NULL) {
+    IFS = " \t\n";
+  }
+
+  tokens = strtok(user_input, IFS);
+  while (tokens != NULL) {
+    if (strdup(tokens) != NULL) {
+      args[*args_num] = strdup(tokens);
+      *args_num += 1;
+    } else {
+      fflush(stdout);
+      fprintf(stderr, "\nString split error\n");
+      fflush(stderr);
+      exit(1);
+    }
+    tokens = strtok(NULL, IFS);
+  }
+}
+
+void expand_input(int *args_num, int *is_home_dir_expanded, char *home_dir, char pid[1024], char *fg_status, char *bg_status, char *args[1029]) {
+  int i = 0;
+  while (i < *args_num && args[i] != NULL) {
+    // "~/" expansion with the HOME environment variable.
+    *is_home_dir_expanded = 0;
+    if (!(home_dir = getenv("HOME"))) {
+      home_dir = "";
+    }
+    if (strncmp(args[i], "~/", 2) == 0) {
+      *is_home_dir_expanded = 1;
+      str_gsub(&args[i], "~", home_dir, is_home_dir_expanded);
+    }
+
+    // "$$" expansion with the shell's PID.
+    str_gsub(&args[i], "$$", pid, is_home_dir_expanded);
+    str_gsub(&args[i], "$?", fg_status, is_home_dir_expanded);
+    str_gsub(&args[i], "$!", bg_status, is_home_dir_expanded);
+
+    i++;
+  }
+}
+
+int is_invalid_input(int *args_num, char *args[1029]) {
+  if (*args_num == 0 || (strcmp(args[0], "#") == 0) || (strncmp(args[0], "#", 1) == 0)) {
+    return 1;
   }
   return 0;
 }
