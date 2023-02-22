@@ -20,15 +20,18 @@
 #include <stdint.h>
 
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded);
+void reset_vars(pid_t *child_pid, int *args_num, int *infile_descriptor, int *outfile_descriptor, int *redirection_result);
+void reset_flags(int *should_run_in_bg, int *is_infile, int *is_outfile);
+void reset_strs(char *tokens, char *in_file_name, char *out_file_name, char pid[1024]);
 void split_input(int *args_num, char *IFS, char *tokens, char *user_input, char *args[1029]);
 
 void expand_input(int *args_num, int *is_home_dir_expanded, char *home_dir, char pid[1024], char *fg_status, char *bg_status, char *args[1029]);
 int is_invalid_input(int *args_num, char *args[1029]);
+void parse_input(int *args_num, int *should_run_in_bg, int *is_infile, int *is_outfile, char **in_file_name, char **out_file_name, char *args[1029]);
+
+void free_memory(int *args_num, char *args[1029]);
 
 void SIGINT_handler(int signo) {
-  //char *message = "\nCaught SIGINT\n";
-  //write(STDOUT_FILENO, message, 16);
-  //raise(SIGUSR2);
 }
 
 void SIGINT_default(int signo) {
@@ -64,16 +67,7 @@ int main(void) {
   int is_infile = 0;
   int is_outfile = 0;
 
-
-  //struct sigaction SIGINT_action = {0};
-  // Fill up SIGINT_action struct.
-  //SIGINT_action.sa_handler = SIGINT_handler;
-  //sigfillset(&SIGINT_action.sa_mask);
-  //SIGINT_action.sa_flags = 0;
-  //sigaction(SIGINT, &SIGINT_action, NULL);
-  // SIGTSTP normally causes a process to halt, which is undesireable.  This shell does not respond to this signal and it sets its disposition to SIG_IGN.
   signal(SIGTSTP, SIG_IGN);
-  //signal(SIGINT, SIG_IGN);
   struct sigaction old_sigint = {0};
   old_sigint.sa_handler = SIGINT_default; 
   sigfillset(&old_sigint.sa_mask);
@@ -88,18 +82,9 @@ int main(void) {
 
   for (;;) {
     // Reset variables.
-    child_pid = -5;
-    tokens = NULL;
-    args_num = 0;
-    should_run_in_bg = 0;
-    in_file_name = NULL;
-    out_file_name = NULL;
-    is_infile = 0;
-    is_outfile = 0;
-    infile_descriptor = -5;
-    outfile_descriptor = -5;
-    redirection_result = -5;
-    sprintf(pid, "%d", getpid());
+    reset_vars(&child_pid, &args_num, &infile_descriptor, &outfile_descriptor, &redirection_result);
+    reset_flags(&should_run_in_bg, &is_infile, &is_outfile);
+    reset_strs(tokens, in_file_name, out_file_name, pid);
 
     // Managing Background Processes
     bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
@@ -145,108 +130,11 @@ int main(void) {
     }
 
     split_input(&args_num, IFS, tokens, user_input, args);
-
     if (is_invalid_input(&args_num, args)) {
       continue;
     }
-
-
     expand_input(&args_num, &is_home_dir_expanded, home_dir, pid, fg_status, bg_status, args);
-
-
-    // Parsing
-    int i = 0;
-    // Find the index number to either # or end of the input.
-    while (i < args_num) {
-      if ((strcmp(args[i], "#") == 0) || i == args_num -1) {
-        break;
-      }
-      i++;
-    }
-
-    // cat myfile > output.txt & #
-    if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0 && strcmp(args[i - 1], "&") == 0) {
-      args[i] = NULL;
-      should_run_in_bg = 1;
-      if(strcmp(args[i - 3], ">") == 0) {
-        out_file_name = args[i - 2];
-        args[i - 3] = NULL;
-        is_outfile = 1;
-      } else if (strcmp(args[i - 3], "<") == 0) {
-        in_file_name = args[i - 2];
-        args[i - 3] = NULL;
-        is_infile = 1;
-      }
-    }
-    // cat myfile > output.txt #
-    else if (i >= 3 && i == args_num - 1 && strcmp(args[i], "#") == 0) {
-      args[i] = NULL;
-      if(strcmp(args[i - 2], ">") == 0) {
-        out_file_name = args[i - 1];
-        args[i - 2] = NULL;
-        is_outfile = 1;
-      } else if (strcmp(args[i - 2], "<") == 0) {
-        in_file_name = args[i - 1];
-        args[i - 2] = NULL;
-        is_infile = 1;
-      }
-    }
-    // cat myfilie > output.txt &
-    else if (i >= 3 && strcmp(args[i], "&") == 0) {
-      args[i] = NULL;
-      should_run_in_bg = 1;
-      if (strcmp(args[i - 2], ">") == 0) {
-        out_file_name = args[i - 1];
-        args[i - 2] = NULL;
-        is_outfile = 1;
-      } else if (strcmp(args[i - 2], "<") == 0) {
-        in_file_name = args[i - 1];
-        args[i - 2] = NULL;
-        is_infile = 1;
-      }
-    }
-    // cat myfile > output.txt
-    else if (i >= 3) {
-      if (strcmp(args[i - 1], ">") == 0) {
-        out_file_name = args[i];
-        is_outfile = 1;
-        args[i - 1] = NULL;
-        if (strcmp(args[i - 3], "<") == 0) {
-          in_file_name = args[i - 2];
-          args[i - 2] = NULL;
-          is_infile = 1;
-          args[i - 3] = NULL;
-        }
-      } else if (strcmp(args[i - 1], "<") == 0) {
-        in_file_name = args[i];
-        args[i - 1] = NULL;
-        is_infile = 1;
-        if (strcmp(args[i - 3], ">") == 0) {
-          out_file_name = args[i - 2];
-          args[i - 2] = NULL;
-          is_outfile = 1;
-          args[i - 3] = NULL;
-        }
-      }
-    }
-   
-    else if (i >= 2 && strcmp(args[i], "#") == 0) {
-      args[i] = NULL;
-    }
-
-    else if (i >= 2 && strcmp(args[i], "&") == 0) {
-      should_run_in_bg = 1;
-      args[i] = NULL;
-    }
-
-    else if (i >= 1 && strcmp(args[i], "#") == 0) {
-      args[i] = NULL;
-    }
-
-    else if (i >= 1 && strcmp(args[i], "&") == 0) {
-      should_run_in_bg = 1;
-      args[i] = NULL;
-    }
+    parse_input(&args_num, &should_run_in_bg, &is_infile, &is_outfile, &in_file_name, &out_file_name, args);
    
 
     // Executing "exit".
@@ -429,11 +317,14 @@ int main(void) {
     }
 
 free:
+    /*
     // Free realloc() from str_gsub();
     for (int i = 0; i < args_num; i++) {
       free(args[i]);
       args[i] = NULL;
     }
+    */
+    free_memory(&args_num, args);
     continue;
   }
   return 0;
@@ -519,4 +410,131 @@ int is_invalid_input(int *args_num, char *args[1029]) {
     return 1;
   }
   return 0;
+}
+
+void parse_input(int *args_num, int *should_run_in_bg, int *is_infile, int *is_outfile, char **in_file_name, char **out_file_name, char *args[1029]) {
+  // Parsing
+  int i = 0;
+  // Find the index number to either # or end of the input.
+  while (i < *args_num) {
+    if ((strcmp(args[i], "#") == 0) || i == *args_num -1) {
+      break;
+    }
+    i++;
+  }
+
+  // cat myfile > output.txt & #
+  if (i >= 3 && i == *args_num - 1 && strcmp(args[i], "#") == 0 && strcmp(args[i - 1], "&") == 0) {
+    args[i] = NULL;
+    *should_run_in_bg = 1;
+    if(strcmp(args[i - 3], ">") == 0) {
+      *out_file_name = args[i - 2];
+      args[i - 3] = NULL;
+      *is_outfile = 1;
+    } else if (strcmp(args[i - 3], "<") == 0) {
+      *in_file_name = args[i - 2];
+      args[i - 3] = NULL;
+      *is_infile = 1;
+    }
+  }
+  // cat myfile > output.txt #
+  else if (i >= 3 && i == *args_num - 1 && strcmp(args[i], "#") == 0) {
+    args[i] = NULL;
+    if(strcmp(args[i - 2], ">") == 0) {
+      *out_file_name = args[i - 1];
+      args[i - 2] = NULL;
+      *is_outfile = 1;
+    } else if (strcmp(args[i - 2], "<") == 0) {
+      *in_file_name = args[i - 1];
+      args[i - 2] = NULL;
+      *is_infile = 1;
+    }
+  }
+  // cat myfilie > output.txt &
+  else if (i >= 3 && strcmp(args[i], "&") == 0) {
+    args[i] = NULL;
+    *should_run_in_bg = 1;
+    if (strcmp(args[i - 2], ">") == 0) {
+      *out_file_name = args[i - 1];
+      args[i - 2] = NULL;
+      *is_outfile = 1;
+    } else if (strcmp(args[i - 2], "<") == 0) {
+      *in_file_name = args[i - 1];
+      args[i - 2] = NULL;
+      *is_infile = 1;
+    }
+  }
+  // cat myfile > output.txt
+  else if (i >= 3) {
+    if (strcmp(args[i - 1], ">") == 0) {
+      *out_file_name = args[i];
+      *is_outfile = 1;
+      args[i - 1] = NULL;
+      if (strcmp(args[i - 3], "<") == 0) {
+        *in_file_name = args[i - 2];
+        args[i - 2] = NULL;
+        *is_infile = 1;
+        args[i - 3] = NULL;
+      }
+    } else if (strcmp(args[i - 1], "<") == 0) {
+      *in_file_name = args[i];
+      args[i - 1] = NULL;
+      *is_infile = 1;
+      if (strcmp(args[i - 3], ">") == 0) {
+        *out_file_name = args[i - 2];
+        args[i - 2] = NULL;
+        *is_outfile = 1;
+        args[i - 3] = NULL;
+      }
+    }
+  }
+   
+  else if (i >= 2 && strcmp(args[i], "#") == 0) {
+    args[i] = NULL;
+  }
+
+  else if (i >= 2 && strcmp(args[i], "&") == 0) {
+    *should_run_in_bg = 1;
+    args[i] = NULL;
+  }
+
+  else if (i >= 1 && strcmp(args[i], "#") == 0) {
+    args[i] = NULL;
+  }
+
+  else if (i >= 1 && strcmp(args[i], "&") == 0) {
+    *should_run_in_bg = 1;
+    args[i] = NULL;
+  }
+}
+
+
+void reset_vars(pid_t *child_pid, int *args_num, int *infile_descriptor, int *outfile_descriptor, int *redirection_result) {
+  *child_pid = -5;
+  *args_num = 0;
+  *infile_descriptor = -5;
+  *outfile_descriptor = -5;
+  *redirection_result = -5;
+}
+
+
+void reset_flags(int *should_run_in_bg, int *is_infile, int *is_outfile) {
+  *should_run_in_bg = 0;
+  *is_infile = 0;
+  *is_outfile = 0;
+}
+
+
+void reset_strs(char *tokens, char *in_file_name, char *out_file_name, char pid[1024]) {
+  tokens = NULL;
+  in_file_name = NULL;
+  out_file_name = NULL;
+  sprintf(pid, "%d", getpid());
+}
+
+void free_memory(int *args_num, char *args[1029]) {
+  for (int i = 0; i < *args_num; i++) {
+    free(args[i]);
+    args[i] = NULL;
+  }
 }
