@@ -20,8 +20,6 @@
 #include <stdint.h>
 
 
-
-
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded);
 void reset_vars(pid_t *child_pid, int *args_num, int *infile_descriptor, int *outfile_descriptor, int *redirection_result);
 void reset_flags(int *should_run_in_bg, int *is_infile, int *is_outfile);
@@ -32,6 +30,7 @@ void expand_input(int *args_num, int *is_home_dir_expanded, char *home_dir, char
 int is_invalid_input(int *args_num, char *args[1029]);
 void parse_input(int *args_num, int *should_run_in_bg, int *is_infile, int *is_outfile, char **in_file_name, char **out_file_name, char *args[1029]);
 int execute_exit(int *args_num, char *fg_status, char *args[1029]);
+int execute_cd(int *args_num, char *home_dir, char *args[1029]);
 void free_memory(int *args_num, char *args[1029]);
 
 void SIGINT_handler(int signo) {
@@ -148,81 +147,12 @@ int main(void) {
       continue;
     }
 
-    /*
-    // Executing "exit".
-    if (strcmp(args[0], "exit") == 0) {
-      if (args_num > 2) {
-        // If too many arguments are given.
-        fflush(stdout);
-        fprintf(stderr, "'exit' command takes only one argument.\n");
-        fflush(stderr);
-        exit(1);
-      }
-
-      if (args_num == 2) {
-        if (isdigit(*args[1]) == 0) {
-          // Correct number of argument is given but it is not an integer.
-          fflush(stdout);
-          fprintf(stderr, "'exit' command only takes an integer argument.\n");
-          fflush(stderr);
-          exit(1);
-        } else {
-          fprintf(stderr, "\nexit\n");
-          kill(getpid(), SIGINT);
-          // Correct number of argument is given and it IS an integer.
-          //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
-          exit(atoi(args[1]));
-        }
-      } else {
-        // No argument is given so it exits.
-        //printf("Expand $? and exit.\n");
-        //printf("%d", atoi(fg_status));
-        fflush(stdout);
-        fprintf(stderr, "\nexit\n");
-        fflush(stderr);
-        exit(atoi(fg_status));
-      }
-      goto free;
-    }
-    */
-
-    
-    // Executing "cd".
     else if (strcmp(args[0], "cd") == 0) {
-      int cd_result;
-      if (args_num > 2) {
-        fflush(stdout);
-        fprintf(stderr, "Incorrect number of arguments.\n");
-        fflush(stderr);
-        goto free;
-      }
-
-      else if (args_num == 2) {
-        cd_result = chdir(args[1]);
-        if (cd_result != 0) {
-          fflush(stdout);
-          fprintf(stderr, "Cannot change directory.\n");
-          fflush(stderr);
-        }
-      }
-
-      else {
-        home_dir = getenv("HOME");
-        if (home_dir) {
-          cd_result = chdir(home_dir);
-          if (cd_result != 0) {
-            fflush(stdout);
-            fprintf(stderr, "Cannot change directory to home.\n");
-            fflush(stderr);
-          }
-        } else {
-          fflush(stdout);
-          fprintf(stderr, "getenv('HOME') failed.");
-          fflush(stderr);
-        }
-      }
-      goto free;
+      execute_cd(&args_num, home_dir, args);
+      free_memory(&args_num, args);
+      continue;
     }
+
     // Executing built-in commands.
     else {
 
@@ -583,6 +513,42 @@ int execute_exit(int *args_num, char *fg_status, char *args[1029]) {
     fprintf(stderr, "\nexit\n");
     fflush(stderr);
     return atoi(fg_status);
+  }
+  return 0;
+}
+
+int execute_cd(int *args_num, char *home_dir, char *args[1029]) {
+  // Executing "cd".
+  int cd_result;
+  if (*args_num > 2) {
+    fflush(stdout);
+    fprintf(stderr, "Incorrect number of arguments.\n");
+    fflush(stderr);
+  }
+
+  else if (*args_num == 2) {
+    cd_result = chdir(args[1]);
+    if (cd_result != 0) {
+      fflush(stdout);
+      fprintf(stderr, "Cannot change directory.\n");
+      fflush(stderr);
+    }
+  }
+
+  else {
+    home_dir = getenv("HOME");
+    if (home_dir) {
+      cd_result = chdir(home_dir);
+      if (cd_result != 0) {
+        fflush(stdout);
+        fprintf(stderr, "Cannot change directory to home.\n");
+        fflush(stderr);
+      }
+    } else {
+      fflush(stdout);
+      fprintf(stderr, "getenv('HOME') failed.");
+      fflush(stderr);
+    }
   }
   return 0;
 }
