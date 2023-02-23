@@ -19,6 +19,9 @@
 #include <fcntl.h>
 #include <stdint.h>
 
+
+
+
 char *str_gsub(char *restrict *restrict input_line, char const *restrict old_word, char const *restrict new_word, int *is_home_dir_expanded);
 void reset_vars(pid_t *child_pid, int *args_num, int *infile_descriptor, int *outfile_descriptor, int *redirection_result);
 void reset_flags(int *should_run_in_bg, int *is_infile, int *is_outfile);
@@ -28,7 +31,7 @@ void split_input(int *args_num, char *IFS, char *tokens, char *user_input, char 
 void expand_input(int *args_num, int *is_home_dir_expanded, char *home_dir, char pid[1024], char *fg_status, char *bg_status, char *args[1029]);
 int is_invalid_input(int *args_num, char *args[1029]);
 void parse_input(int *args_num, int *should_run_in_bg, int *is_infile, int *is_outfile, char **in_file_name, char **out_file_name, char *args[1029]);
-
+int execute_exit(int *args_num, char *fg_status, char *args[1029]);
 void free_memory(int *args_num, char *args[1029]);
 
 void SIGINT_handler(int signo) {
@@ -136,7 +139,16 @@ int main(void) {
     expand_input(&args_num, &is_home_dir_expanded, home_dir, pid, fg_status, bg_status, args);
     parse_input(&args_num, &should_run_in_bg, &is_infile, &is_outfile, &in_file_name, &out_file_name, args);
    
+    if (strcmp(args[0], "exit") == 0) {
+      int exit_status = execute_exit(&args_num, fg_status, args);
+      if (exit_status) {
+        exit(exit_status);
+      }
+      free_memory(&args_num, args);
+      continue;
+    }
 
+    /*
     // Executing "exit".
     if (strcmp(args[0], "exit") == 0) {
       if (args_num > 2) {
@@ -172,6 +184,7 @@ int main(void) {
       }
       goto free;
     }
+    */
 
     
     // Executing "cd".
@@ -537,4 +550,39 @@ void free_memory(int *args_num, char *args[1029]) {
     free(args[i]);
     args[i] = NULL;
   }
+}
+
+int execute_exit(int *args_num, char *fg_status, char *args[1029]) {
+  if (*args_num > 2) {
+    // If too many arguments are given.
+    fflush(stdout);
+    fprintf(stderr, "'exit' command takes only one argument.\n");
+    fflush(stderr);
+    return 1;
+  }
+
+  if (*args_num == 2) {
+    if (isdigit(*args[1]) == 0) {
+      // Correct number of argument is given but it is not an integer.
+      fflush(stdout);
+      fprintf(stderr, "'exit' command only takes an integer argument.\n");
+      fflush(stderr);
+      return 1;
+    } else {
+      fprintf(stderr, "\nexit\n");
+      kill(getpid(), SIGINT);
+      // Correct number of argument is given and it IS an integer.
+      //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
+      return atoi(args[1]);
+    }
+  } else {
+    // No argument is given so it exits.
+    //printf("Expand $? and exit.\n");
+    //printf("%d", atoi(fg_status));
+    fflush(stdout);
+    fprintf(stderr, "\nexit\n");
+    fflush(stderr);
+    return atoi(fg_status);
+  }
+  return 0;
 }
