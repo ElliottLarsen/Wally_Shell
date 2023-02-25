@@ -110,10 +110,7 @@ int main(void) {
     
     
     // Prompt
-    char *prompt;
-    if (!(prompt = getenv("PS1"))) {
-      prompt = "\0";
-    }
+    char *prompt = "WallyShell> ";
     fflush(stdout);
     fprintf(stderr, "%s", prompt);
     fflush(stderr);
@@ -140,11 +137,8 @@ int main(void) {
    
     if (strcmp(args[0], "exit") == 0) {
       int exit_status = execute_exit(&args_num, fg_status, args);
-      if (exit_status) {
-        exit(exit_status);
-      }
       free_memory(&args_num, args);
-      continue;
+      exit(exit_status);
     }
 
     else if (strcmp(args[0], "cd") == 0) {
