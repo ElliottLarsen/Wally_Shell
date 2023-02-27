@@ -32,6 +32,7 @@ void parse_input(int *args_num, int *should_run_in_bg, int *is_infile, int *is_o
 int execute_exit(int *args_num, char *fg_status, char *args[1029]);
 int execute_cd(int *args_num, char *home_dir, char *args[1029]);
 void free_memory(int *args_num, char *args[1029]);
+void check_bg_process(pid_t *bg_children, int *child_status);
 
 void SIGINT_handler(int signo) {
 }
@@ -45,12 +46,12 @@ int main(void) {
   int args_num = 0;
   size_t n = 0;
   char *IFS = " \t\n";
-  char *home_dir;
+  char *home_dir = NULL;
   char pid[1024];
   //sprintf(pid, "%d", getpid());
   pid_t child_pid;
   pid_t bg_children;
-  // "$$" defaults to "0"
+  // "$?" defaults to "0"
   char *fg_status = "0";
   // ""$!" defaults to "" if no background process ID is available.
   char *bg_status = "";
@@ -88,26 +89,7 @@ int main(void) {
     reset_flags(&should_run_in_bg, &is_infile, &is_outfile);
     reset_strs(tokens, in_file_name, out_file_name, pid);
 
-    // Managing Background Processes
-    bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
-    while (bg_children > 0) {
-      fflush(stdout);
-
-      if (WIFEXITED(child_status)) {
-        fprintf(stderr, "Child process %jd done.  Exit status %d.\n", (intmax_t)bg_children, WEXITSTATUS(child_status));
-      }
-      if (WIFSIGNALED(child_status)) {
-        fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t)bg_children, WTERMSIG(child_status));
-      }
-      if (WIFSTOPPED(child_status)) {
-        kill(bg_children, SIGCONT);
-        fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)bg_children, WSTOPSIG(child_status));
-      }
-      fflush(stderr);
-      bg_children = waitpid(0, &child_status, WUNTRACED | WNOHANG);
-    }
-
-    
+    check_bg_process(&bg_children, &child_status);    
     
     // Prompt
     char *prompt = "WallyShell> ";
@@ -123,7 +105,6 @@ int main(void) {
     // Error from reading an input.
     if (line_length == -1) {
       clearerr(stderr);
-      //clearerr(stdin);
       errno = 0;
       continue;
     }
@@ -180,7 +161,6 @@ int main(void) {
               fflush(stderr);
               exit(1);
             }
-            // Is this it?  More things to do?
           }
 
           if (is_outfile) {
@@ -246,22 +226,12 @@ int main(void) {
             bg_status = calloc(1024, sizeof(char));
             sprintf(bg_status, "%d", child_pid);
           }
-          goto free;
+
+          free_memory(&args_num, args);
       
       }
-      //continue;
-      //printf("BUILT-IN");
     }
 
-free:
-    /*
-    // Free realloc() from str_gsub();
-    for (int i = 0; i < args_num; i++) {
-      free(args[i]);
-      args[i] = NULL;
-    }
-    */
-    free_memory(&args_num, args);
     continue;
   }
   return 0;
@@ -545,4 +515,26 @@ int execute_cd(int *args_num, char *home_dir, char *args[1029]) {
     }
   }
   return 0;
+}
+
+void check_bg_process(pid_t *bg_children, int *child_status) {
+
+  // Managing Background Processes
+  *bg_children = waitpid(0, child_status, WUNTRACED | WNOHANG);
+  while (*bg_children > 0) {
+    fflush(stdout);
+
+    if (WIFEXITED(*child_status)) {
+      fprintf(stderr, "Child process %jd done. Exit status %d.\n", (intmax_t)*bg_children, WEXITSTATUS(*child_status));
+    }
+    if (WIFSIGNALED(*child_status)) {
+      fprintf(stderr, "Child process %jd done. Signaled %d.\n", (intmax_t)*bg_children, WTERMSIG(*child_status));
+    }
+    if (WIFSTOPPED(*child_status)) {
+      kill(*bg_children, SIGCONT);
+      fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)*bg_children, WSTOPSIG(*child_status));
+    }
+    fflush(stderr);
+    *bg_children = waitpid(0, child_status, WUNTRACED | WNOHANG);
+  }
 }
