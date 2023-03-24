@@ -532,7 +532,7 @@ void check_bg_process(pid_t *bg_children, int *child_status) {
     }
     if (WIFSTOPPED(*child_status)) {
       kill(*bg_children, SIGCONT);
-      fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)*bg_children, WSTOPSIG(*child_status));
+      fprintf(stderr, "Child process %jd stopped. Continuing.\n", (intmax_t)*bg_children);
     }
     fflush(stderr);
     *bg_children = waitpid(0, child_status, WUNTRACED | WNOHANG);
