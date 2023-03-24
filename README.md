@@ -2,6 +2,7 @@
 This is a shell built in C.  This shell implements a command line interface similar to well-known shells such as bash.
 ## Technologies
 * C
+## GIF Walkthrough
 ## Project Details
 * This shell prints interactive input prompt and receives user input.
     * Before printing a prompt message, this shell checks for any unwaited-for background processes in the same process group ID as the shell itself and prints informative messages to `stderr`.
@@ -30,7 +31,9 @@ This is a shell built in C.  This shell implements a command line interface simi
         * The `cd` command takes one argument.  If not provided, the argument is implied to be the expansion of `~/`, the value of the `HOME` environment variable.
         * The shell changes its own current working directory to the specified (or implied) path.
 * Other commands are executed using appropriate `exec(3)` function.
-* This shell also implements custom behavior for `SIGINT` and `SIGTSTP` signals.
-## GIF Walkthrough
-
+    * The command with its arguments is executed in the new child process via `fork()`.
+    * In the child process:
+        * If a filename was specified as the operand to the input or output redirection operator (`<` or `>`), the specified file will be opened for reading/writing on `stdin`/`stdout`. 
+        * If a file name was specified as the operand to the output redirection operator but the file does not exist, then the child process will create the file with permissions `0777`.
+        * If an error occurs in the child process, it will print an error message to `stderr` and exit with a non-zero exit status.
 ## Who is Wally?
