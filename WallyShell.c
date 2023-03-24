@@ -193,7 +193,7 @@ int main(void) {
           }
 
           fflush(stdout);
-          fprintf(stderr, "execvp() error. Handle this.\n");
+          fprintf(stderr, "Cannot execute the command.\n");
           fflush(stderr);
           exit(1);
           break;
