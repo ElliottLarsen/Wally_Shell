@@ -1,6 +1,6 @@
 // Author: Elliott Larsen
-// Date:
-// Description: 
+// Date: 03/28/2023
+// Description: This is a shell built in C. This shell implements a command line interface similar to well-known shells such as bash.
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -132,12 +132,11 @@ int main(void) {
     else {
 
       child_pid = fork();
-      //printf("\nHere is child_pid from fork(): %d\n", child_pid);
       
       switch(child_pid) {
         case -1:
           fflush(stdout);
-          fprintf(stderr, "fork() error. Handle this.\n");
+          fprintf(stderr, "fork() error.\n");
           fflush(stderr);
           exit(1);
           break;
@@ -179,8 +178,6 @@ int main(void) {
               exit(1);
             }
           }
-
-          //printf("Message from the child process.\n");
           // Error check for execvp.
           execvp(args[0], args);
 
@@ -199,13 +196,9 @@ int main(void) {
           break;
 
         default:
-          //printf("Message from the shell.\n");
-          //printf("Here is child_pid from default: %d\n", child_pid);
           if (!should_run_in_bg) {
-            //printf("\nPerform a blocking wait on the foreground child process.\n");
             child_pid = waitpid(child_pid, &child_status, 0);
             fg_status = calloc(1024, sizeof(char));
-            //printf("Here is child_pid after waitpid: %d", child_pid);
             if (WIFSIGNALED(child_status)) {
               sprintf(fg_status, "%d", 128 + WTERMSIG(child_status));
             } 
@@ -221,17 +214,13 @@ int main(void) {
             else {
               sprintf(fg_status, "%d", WEXITSTATUS(child_status));
             }
-            //printf("Here is fg_status: %s", fg_status);
           } else {
             bg_status = calloc(1024, sizeof(char));
             sprintf(bg_status, "%d", child_pid);
           }
-
           free_memory(&args_num, args);
-      
       }
     }
-
     continue;
   }
   return 0;
@@ -466,13 +455,10 @@ int execute_exit(int *args_num, char *fg_status, char *args[1029]) {
       fprintf(stderr, "\nexit\n");
       kill(getpid(), SIGINT);
       // Correct number of argument is given and it IS an integer.
-      //printf("Print to stderr, sent SIGINT to all child processes, and exit immediately with the given integer value.\n");
       return atoi(args[1]);
     }
   } else {
     // No argument is given so it exits.
-    //printf("Expand $? and exit.\n");
-    //printf("%d", atoi(fg_status));
     fflush(stdout);
     fprintf(stderr, "\nexit\n");
     fflush(stderr);
@@ -518,7 +504,6 @@ int execute_cd(int *args_num, char *home_dir, char *args[1029]) {
 }
 
 void check_bg_process(pid_t *bg_children, int *child_status) {
-
   // Managing Background Processes
   *bg_children = waitpid(0, child_status, WUNTRACED | WNOHANG);
   while (*bg_children > 0) {
