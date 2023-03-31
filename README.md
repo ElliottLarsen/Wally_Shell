@@ -47,7 +47,7 @@ This is a shell built in C.  This shell implements a command line interface simi
         * If a file name was specified as the operand to the output redirection operator but the file does not exist, then the child process will create the file with permissions `0777`.
         * If an error occurs in the child process, it will print an error message to `stderr` and exit with a non-zero exit status.
 ## Who is Wally?
-Wally, whom this shell is named after, is my companion animal and is a connoisseur of socks.
+Wally, after whom this shell is named, is my companion animal and a connoisseur of socks.
 <p>
 <image src = "Wally.JPEG" title="Wally" width = 300 height = 400>
 </p>
